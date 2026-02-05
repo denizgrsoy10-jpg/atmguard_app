@@ -1,17 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import KpiRow from "@/components/KpiRow";
 import OverviewBottomStrip from "@/components/OverviewBottomStrip";
 import { useTranslation } from "@/hooks/useTranslation";
 
-import "leaflet/dist/leaflet.css";
-import "leaflet.markercluster/dist/MarkerCluster.css";
-import "leaflet.markercluster/dist/MarkerCluster.Default.css";
-
-import L from "leaflet";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
-import MarkerClusterGroup from "react-leaflet-cluster";
+const OverviewMap = dynamic(() => import("@/components/OverviewMap"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center h-full">
+      <div className="text-[#A7B8D8]">Loading map...</div>
+    </div>
+  ),
+});
 
 type ATM = {
   atm_id: string;
@@ -38,118 +40,6 @@ type Top10Item = {
 };
 
 type ZoneItem = { zone: string; risk: number };
-
-function getBandColor(band?: string) {
-  if (band === "High") return "#E63946";
-  if (band === "Medium") return "#F2B705";
-  return "#2E86FF"; // Low
-}
-
-// Tek ATM için küçük nokta icon'u (OFFSITE = kare, ONSITE = yuvarlak)
-function makeAtmDotIcon(color: string, isOffsite: boolean = false) {
-  const borderRadius = isOffsite ? "2px" : "999px"; // kare vs yuvarlak
-  return L.divIcon({
-    className: "",
-    html: `<div style="
-      width:10px;height:10px;border-radius:${borderRadius};
-      background:${color};
-      border:2px solid rgba(255,255,255,0.78);
-      box-shadow:0 0 0 2px rgba(43,65,107,0.65);
-    "></div>`,
-    iconSize: [10, 10],
-    iconAnchor: [5, 5],
-  });
-}
-
-/**
- * Premium cluster icon
- * Üst: "42 ATM"
- * Alt: "H:12  M:20  L:10" (tek satır, taşma yok)
- */
-function makeClusterIcon(cluster: any) {
-  const markers: any[] = cluster.getAllChildMarkers();
-  let h = 0,
-    m = 0,
-    l = 0;
-
-  for (const mk of markers) {
-    const b = (mk.options as any).riskBand as "High" | "Medium" | "Low" | undefined;
-    if (b === "High") h++;
-    else if (b === "Medium") m++;
-    else l++;
-  }
-
-  const count = cluster.getChildCount();
-
-  // dominant band (sadece vurgu için)
-  let dominant: "High" | "Medium" | "Low" = "Low";
-  if (h >= m && h >= l) dominant = "High";
-  else if (m >= h && m >= l) dominant = "Medium";
-
-  const accent = dominant === "High" ? "#E63946" : dominant === "Medium" ? "#F2B705" : "#2E86FF";
-
-  const html = `
-  <div style="
-    position:relative;
-    display:flex;flex-direction:column;align-items:center;justify-content:center;
-    width:78px;height:52px;border-radius:16px;
-    background: rgba(14,33,66,0.74);
-    border: 1px solid rgba(46,134,255,0.55);
-    box-shadow: 0 10px 26px rgba(0,0,0,0.30);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    color: rgba(255,255,255,0.92);
-    font-family: ui-sans-serif, system-ui, -apple-system;
-    overflow:hidden;
-  ">
-    <div style="
-      font-weight:900;
-      font-size:12px;
-      line-height:12px;
-      letter-spacing:0.2px;
-      white-space:nowrap;
-    ">
-      ${count} ATM
-    </div>
-
-    <div style="
-      margin-top:6px;
-      font-size:9px;
-      line-height:9px;
-      letter-spacing:0px;
-      color: rgba(167,184,216,0.95);
-      display:flex;
-      gap:6px;
-      align-items:center;
-      white-space:nowrap;
-    ">
-      <span style="display:flex;align-items:center;gap:3px;">
-        <i style="width:6px;height:6px;border-radius:999px;background:#E63946;display:inline-block;"></i>H:${h}
-      </span>
-      <span style="display:flex;align-items:center;gap:3px;">
-        <i style="width:6px;height:6px;border-radius:999px;background:#F2B705;display:inline-block;"></i>M:${m}
-      </span>
-      <span style="display:flex;align-items:center;gap:3px;">
-        <i style="width:6px;height:6px;border-radius:999px;background:#2E86FF;display:inline-block;"></i>L:${l}
-      </span>
-    </div>
-
-    <div style="
-      position:absolute; inset:0;
-      border-radius:16px;
-      border:2px solid ${accent};
-      opacity:0.32;
-      pointer-events:none;
-    "></div>
-  </div>`;
-
-  return L.divIcon({
-    html,
-    className: "",
-    iconSize: [78, 52],
-    iconAnchor: [39, 26],
-  });
-}
 
 export default function OverviewPage() {
   const { t } = useTranslation();
@@ -185,7 +75,18 @@ export default function OverviewPage() {
   useEffect(() => {
     fetch("/api/atm-master", { cache: "no-store" })
       .then((r) => r.json())
-      .then((d) => setAtms(d.atms || []))
+      .then((d) => {
+        const parsedAtms = (d.atms || []).map((a: any) => ({
+          ...a,
+          latitude: typeof a.latitude === 'string' 
+            ? parseFloat(a.latitude.replace(',', '.')) 
+            : a.latitude,
+          longitude: typeof a.longitude === 'string' 
+            ? parseFloat(a.longitude.replace(',', '.')) 
+            : a.longitude,
+        }));
+        setAtms(parsedAtms);
+      })
       .catch(() => setAtms([]));
 
     fetch("/api/overview-top10", { cache: "no-store" })
@@ -201,7 +102,9 @@ export default function OverviewPage() {
 
   const center = useMemo<[number, number]>(() => {
     if (!atms.length) return [39.0, 35.0];
-    return [atms[0].latitude, atms[0].longitude];
+    const lat = typeof atms[0].latitude === 'number' ? atms[0].latitude : 39.0;
+    const lng = typeof atms[0].longitude === 'number' ? atms[0].longitude : 35.0;
+    return [lat, lng];
   }, [atms]);
 
   const top10Band = useMemo(() => {
@@ -226,94 +129,6 @@ export default function OverviewPage() {
       }
     });
   };
-
-  const getClusterIcon = useCallback(
-    (cluster: any) => {
-      const markers: any[] = cluster.getAllChildMarkers();
-      let h = 0,
-        m = 0,
-        l = 0;
-
-      for (const mk of markers) {
-        const b = (mk.options as any).riskBand as "High" | "Medium" | "Low" | undefined;
-        if (b === "High") h++;
-        else if (b === "Medium") m++;
-        else l++;
-      }
-
-      const count = cluster.getChildCount();
-
-      let dominant: "High" | "Medium" | "Low" = "Low";
-      if (h >= m && h >= l) dominant = "High";
-      else if (m >= h && m >= l) dominant = "Medium";
-
-      const accent = dominant === "High" ? "#E63946" : dominant === "Medium" ? "#F2B705" : "#2E86FF";
-
-      const html = `
-      <div style="
-        position:relative;
-        display:flex;flex-direction:column;align-items:center;justify-content:center;
-        width:82px;height:58px;border-radius:16px;
-        background: rgba(14,33,66,0.74);
-        border: 1px solid rgba(46,134,255,0.55);
-        box-shadow: 0 10px 26px rgba(0,0,0,0.30);
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-        color: rgba(255,255,255,0.92);
-        font-family: ui-sans-serif, system-ui, -apple-system;
-        overflow:hidden;
-        padding:3px;
-      ">
-        <div style="
-          font-weight:900;
-          font-size:11px;
-          line-height:11px;
-          letter-spacing:0.2px;
-          white-space:nowrap;
-        ">
-          ${count} ATM
-        </div>
-
-        <div style="
-          margin-top:4px;
-          font-size:8px;
-          line-height:8px;
-          letter-spacing:0px;
-          color: rgba(167,184,216,0.95);
-          display:flex;
-          gap:3px;
-          align-items:center;
-          white-space:nowrap;
-        ">
-          <span style="display:flex;align-items:center;gap:2px;">
-            <i style="width:5px;height:5px;border-radius:999px;background:#E63946;display:inline-block;"></i>H:${h}
-          </span>
-          <span style="display:flex;align-items:center;gap:2px;">
-            <i style="width:5px;height:5px;border-radius:999px;background:#F2B705;display:inline-block;"></i>M:${m}
-          </span>
-          <span style="display:flex;align-items:center;gap:2px;">
-            <i style="width:5px;height:5px;border-radius:999px;background:#2E86FF;display:inline-block;"></i>L:${l}
-          </span>
-        </div>
-
-        <div style="
-          position:absolute; inset:0;
-          border-radius:16px;
-          border:2px solid ${accent};
-          opacity:0.32;
-          pointer-events:none;
-        "></div>
-      </div>`;
-
-      return L.divIcon({
-        html,
-        className: "",
-        iconSize: [82, 58],
-        iconAnchor: [41, 29],
-      });
-    },
-    []
-  );
 
   return (
     <div className="space-y-4">
@@ -421,51 +236,11 @@ export default function OverviewPage() {
             </div>
 
             <div className="h-[520px] w-full">
-              <MapContainer
+              <OverviewMap
+                filteredAtms={filteredAtms}
                 center={center}
-                zoom={5.6}
-                scrollWheelZoom={false}
-                preferCanvas={true}
-                style={{ height: "100%", width: "100%" }}
-              >
-                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-
-                <MarkerClusterGroup
-                  chunkedLoading
-                  showCoverageOnHover={false}
-                  iconCreateFunction={getClusterIcon as any}
-                >
-                  {filteredAtms.map((a) => {
-                    const band = top10Band.get(String(a.atm_id)) ?? "Low";
-                    const color = getBandColor(band);
-                    const isOffsite = a.location_type === "Offsite";
-                    const icon = makeAtmDotIcon(color, isOffsite);
-
-                    return (
-                      <Marker
-                        key={a.atm_id}
-                        position={[a.latitude, a.longitude]}
-                        icon={icon}
-                        // @ts-ignore
-                        riskBand={band}
-                      >
-                        <Popup>
-                          <div style={{ fontWeight: 800 }}>ATM {a.atm_id}</div>
-                          <div style={{ opacity: 0.85 }}>{a.atm_name ? a.atm_name : ""}</div>
-                          <div>
-                            {a.city} / {a.district}
-                          </div>
-                          <div style={{ fontSize: "11px", opacity: 0.7, marginTop: "4px" }}>
-                            {a.location_type === "Offsite" ? "📍 OFFSITE" : "🏢 ONSITE (Şube)"}
-                          </div>
-                          <div>Zone: {a.zone ?? "-"}</div>
-                          <div>Risk: {band}</div>
-                        </Popup>
-                      </Marker>
-                    );
-                  })}
-                </MarkerClusterGroup>
-              </MapContainer>
+                top10Band={top10Band}
+              />
             </div>
           </div>
 

@@ -1,7 +1,7 @@
-import type { Config } from "tailwindcss";
+import type { NextConfig } from "next";
 
-export default {
-  content: ["./src/**/*.{js,ts,jsx,tsx,mdx}"],
-  theme: { extend: {} },
-  plugins: [],
-} satisfies Config;
+const nextConfig: NextConfig = {
+  /* config options here */
+};
+
+export default nextConfig;
