@@ -23,6 +23,8 @@ type TopItem = {
   risk_band: "High" | "Medium" | "Low";
   expected_saving_try: number;
   reason: string;
+  availability: number;
+  riskScore: number;
 };
 
 export async function GET() {
@@ -55,6 +57,11 @@ export async function GET() {
         // Expected saving türet
         const baseSaving = 1000 + (riskScore * 600);
         
+        // Availability hesapla (risk arttıkça availability düşer)
+        // Yüksek risk = düşük availability, Düşük risk = yüksek availability
+        const baseAvailability = 99.5 - (riskScore * 7); // 92.5% - 99.5% arası
+        const availability = Math.round((baseAvailability + (hashScore * 2)) * 100) / 100;
+        
         const reasons = [
           "Yaşlı ekipman, tamir sıklığı artmış",
           "Bölgesel anomali, drift sinyali",
@@ -73,6 +80,7 @@ export async function GET() {
           risk_band: riskBand,
           expected_saving_try: Math.round(baseSaving),
           reason: reasons[idx % reasons.length],
+          availability: availability,
           riskScore
         };
       })
@@ -106,7 +114,7 @@ export async function GET() {
     // Tekrar risk score'a göre sırala (en yüksek ilk)
     result.sort((a, b) => b.riskScore - a.riskScore);
 
-    const finalItems = result.slice(0, 10).map(({ riskScore, zone, ...rest }) => rest) as TopItem[];
+    const finalItems = result.slice(0, 10) as TopItem[];
 
     return NextResponse.json({
       items: finalItems

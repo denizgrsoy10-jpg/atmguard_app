@@ -6,6 +6,58 @@ import Image from "next/image";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 
+type MetricInfo = {
+  title: string;
+  description: string;
+  purpose: string;
+  interpretation: string;
+};
+
+const CASHFLOW_METRIC_EXPLANATIONS: Record<string, MetricInfo> = {
+  "atms_tracked": {
+    title: "Takip Edilen ATM Sayısı",
+    description: "Nakit akışı yönetim sisteminde aktif olarak izlenen toplam ATM sayısı.",
+    purpose: "Sistemin kapsama alanını ve yönetilen varlık büyüklüğünü göstermek.",
+    interpretation: "Yüksek sayı geniş kapsama demek. Tüm ATM'ler sistemde mi? Eksik ATM varsa entegrasyon eksikliği olabilir."
+  },
+  "total_cash": {
+    title: "Toplam Nakit (TRY)",
+    description: "Tüm ATM'lerde şu anda bulunan toplam nakit miktarı (Türk Lirası).",
+    purpose: "Operasyonel sermaye ve likidite yönetimi. Ne kadar nakit ATM'lerde kilitli durumda?",
+    interpretation: "Çok yüksek = ATM'lerde fazla nakit, optimizasyon fırsatı. Çok düşük = kıtlık riski, acil ikmal gerekebilir."
+  },
+  "low_cash_atms": {
+    title: "Düşük Nakit ATM Sayısı",
+    description: "Nakit seviyesi kritik eşiğin altına düşmüş ATM'lerin sayısı. Acil ikmal gerektirebilir.",
+    purpose: "Kıtlık riskini tespit etmek. Hangi ATM'ler yakında nakit biter?",
+    interpretation: "Yüksek sayı = CIT operasyonları yetersiz veya talep tahmini hatalı. Hızlı aksiyon gerekli, müşteri memnuniyeti riski."
+  },
+  "predicted_shortage": {
+    title: "Tahmini Kıtlık (7 Gün)",
+    description: "Önümüzdeki 7 gün içinde nakit tükenmesi beklenen ATM sayısı. AI tahmin modeli sonucu.",
+    purpose: "Proaktif planlama. Hangi ATM'lere öncelikle ikmal yapılmalı?",
+    interpretation: "0 = ideal durum. Yüksek sayı = CIT planlaması yapılmalı, aksi halde servis kesintisi riski. Tahmin doğruluğu kritik."
+  },
+  "planned_replenishments": {
+    title: "Planlı İkmal Sayısı (7 Gün)",
+    description: "Önümüzdeki 7 gün için planlanmış nakit ikmali operasyonlarının sayısı.",
+    purpose: "CIT operasyonel yükünü ve lojistik kapasiteyi göstermek. Planlama yapıldı mı?",
+    interpretation: "Planned Repl. >= Pred. Shortage olmalı. Düşükse bazı ATM'ler atlanmış, kıtlık riski var. Yüksekse gereksiz maliyetli operasyonlar."
+  },
+  "heat_map": {
+    title: "Low Cash ATM Heat Map (Düşük Nakit Isı Haritası)",
+    description: "Türkiye haritası üzerinde düşük nakit seviyeli ATM'lerin yoğunluk haritası. Kırmızı alanlar yüksek yoğunluk, yeşil alanlar düşük yoğunluk gösterir.",
+    purpose: "Coğrafi nakit kıtlığı dağılımını görselleştirmek. Hangi bölgelerde nakit sıkıntısı yoğunlaşmış? CIT ekipleri nereye odaklanmalı?",
+    interpretation: "Kırmızı/turuncu bölgeler = Yüksek risk, o bölgeye CIT rotası planlanmalı. Yeşil bölgeler = Stabil durum. Şehir merkezlerinde yoğunluk normaldir (yüksek işlem hacmi). Beklenmedik yerlerde yoğunluk varsa operasyonel sorun olabilir."
+  },
+  "cash_trend_forecast": {
+    title: "Cash Trend & Forecast (Nakit Trend ve Tahmin)",
+    description: "ATM'lerdeki nakit seviyesinin zaman içindeki değişimi ve gelecek tahmini. Geçmiş trendler ve AI tahminleri bir arada gösterilir.",
+    purpose: "Nakit akış trendlerini ve gelecek ihtiyaçlarını öngörmek. Nakit seviyeleri artıyor mu, azalıyor mu? Ne zaman ikmal gerekecek?",
+    interpretation: "Düşen trend = Nakit tükeniyor, ikmal planlanmalı. Yükselen trend = Nakit birikmesi, toplama operasyonu gerekebilir. Tahmin doğruluğu yüksekse CIT planlaması güvenilirdir. Ani dalgalanmalar olağandışı işlem hacmi veya operasyonel sorun gösterebilir."
+  }
+};
+
 type Payload = {
   summary: {
     atms_tracked: number;
@@ -25,9 +77,17 @@ type Payload = {
   }[];
 };
 
-function Card({ label, value }: { label: string; value: string }) {
+function Card({ label, value, infoKey, onInfoClick }: { label: string; value: string; infoKey?: string; onInfoClick?: (info: MetricInfo) => void }) {
   return (
-    <div className="bg-[#0E2142] rounded-2xl p-4 shadow-lg ring-1 ring-[#2B416B]">
+    <div className="bg-[#0E2142] rounded-2xl p-4 shadow-lg ring-1 ring-[#2B416B] relative group">
+      {infoKey && onInfoClick && (
+        <button
+          onClick={() => onInfoClick(CASHFLOW_METRIC_EXPLANATIONS[infoKey])}
+          className="absolute top-2 right-2 w-5 h-5 rounded-full bg-[#2E86FF]/20 hover:bg-[#2E86FF]/40 text-[#2E86FF] text-xs flex items-center justify-center transition opacity-0 group-hover:opacity-100"
+        >
+          ?
+        </button>
+      )}
       <div className="text-xs text-[#A7B8D8] mb-1">{label}</div>
       <div className="text-2xl font-bold">{value}</div>
       <div className="mt-3 h-1.5 w-full bg-[#112544] rounded-full overflow-hidden">
@@ -39,6 +99,7 @@ function Card({ label, value }: { label: string; value: string }) {
 
 export default function CashFlowOpsPage() {
   const [data, setData] = useState<Payload | null>(null);
+  const [infoModal, setInfoModal] = useState<MetricInfo | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [showShortageModal, setShowShortageModal] = useState(false);
   const [showReplModal, setShowReplModal] = useState(false);
@@ -76,6 +137,8 @@ export default function CashFlowOpsPage() {
   const [nearbyAtmsData, setNearbyAtmsData] = useState<any[]>([]);
   const [showOperationModal, setShowOperationModal] = useState(false);
   const [selectedOperationType, setSelectedOperationType] = useState<"replenishment" | "collection" | null>(null);
+  const [showOperationMapModal, setShowOperationMapModal] = useState(false);
+  const [operationAtms, setOperationAtms] = useState<any[]>([]);
   const [showAllRouteAtms, setShowAllRouteAtms] = useState(false);
   const [showAllNmSlaModal, setShowAllNmSlaModal] = useState(false);
   const [slaDateStart, setSlaDateStart] = useState<string>("2026-02-01");
@@ -101,6 +164,21 @@ export default function CashFlowOpsPage() {
   const [aiEngineEnabled, setAiEngineEnabled] = useState<boolean>(true);
   const [aiEngineMode, setAiEngineMode] = useState<"auto" | "manual">("auto");
   const [aiEngineStatus, setAiEngineStatus] = useState<"active" | "optimizing" | "idle">("active");
+
+  // SLA Times based on Zone and Operation Type (from contract)
+  const getSlaHours = (zone: string, isPlanned: boolean): number => {
+    const slaMap: { [key: string]: { planned: number; unplanned: number } } = {
+      "1": { planned: 9, unplanned: 3 },
+      "2": { planned: 9.5, unplanned: 5 },
+      "3": { planned: 10, unplanned: 5 },
+      "4": { planned: 10, unplanned: 5 },
+      "5": { planned: 10, unplanned: 5 },
+      "12": { planned: 10, unplanned: 5 }
+    };
+    
+    const zoneSla = slaMap[zone] || { planned: 10, unplanned: 5 }; // Default fallback
+    return isPlanned ? zoneSla.planned : zoneSla.unplanned;
+  };
 
 
   useEffect(() => {
@@ -177,18 +255,27 @@ export default function CashFlowOpsPage() {
       }
       
       // Calculate SLA exceeded ATMs (mock: ATMs with cash level < 20% for more than 3 days)
-      const slaExceeded = atms.slice(0, 23).map((a: any) => ({
-        atm_id: String(a.atm_id),
-        atm_name: a.atm_name || "N/A",
-        city: a.city,
-        district: a.district,
-        cash_level: Math.floor(Math.random() * 15) + 5, // 5-20% remaining
-        days_exceeded: Math.floor(Math.random() * 5) + 1, // 1-5 days exceeded
-        sla_target: 24, // 24 hours SLA target
-        hours_exceeded: Math.floor(Math.random() * 72) + 24, // 24-96 hours exceeded
-        latitude: typeof a.latitude === 'string' ? parseFloat(a.latitude.replace(',', '.')) : a.latitude,
-        longitude: typeof a.longitude === 'string' ? parseFloat(a.longitude.replace(',', '.')) : a.longitude,
-      }));
+      const slaExceeded = atms.slice(0, 23).map((a: any) => {
+        const zone = a.zone || "3";
+        const isPlanned = Math.random() > 0.3; // 70% planlı operasyon
+        const slaTargetHours = getSlaHours(zone, isPlanned);
+        const hoursExceeded = Math.floor(Math.random() * 48) + slaTargetHours; // Exceeded by some hours
+        
+        return {
+          atm_id: String(a.atm_id),
+          atm_name: a.atm_name || "N/A",
+          city: a.city,
+          district: a.district,
+          zone: zone,
+          cash_level: Math.floor(Math.random() * 15) + 5, // 5-20% remaining
+          days_exceeded: Math.floor(hoursExceeded / 24) + 1,
+          sla_target: slaTargetHours,
+          hours_exceeded: hoursExceeded - slaTargetHours,
+          operation_type: isPlanned ? "Planlı" : "Plansız",
+          latitude: typeof a.latitude === 'string' ? parseFloat(a.latitude.replace(',', '.')) : a.latitude,
+          longitude: typeof a.longitude === 'string' ? parseFloat(a.longitude.replace(',', '.')) : a.longitude,
+        };
+      });
       
       // Calculate nearby ATMs for SLA exceeded ATMs
       const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -277,6 +364,8 @@ export default function CashFlowOpsPage() {
           operation: "ikmal",
           amount: `₺${(Math.random() * 400000 + 200000).toFixed(0)}`,
           planned: i % 3 !== 0, // 33% plansız, 67% planlı
+          sla_hours: getSlaHours(a.zone || "3", i % 3 !== 0),
+          zone: a.zone || "3"
         })),
       });
     }
@@ -306,6 +395,8 @@ export default function CashFlowOpsPage() {
           operation: i % 3 === 0 ? "toplama" : "ikmal",
           amount: `₺${(Math.random() * 450000 + 250000).toFixed(0)}`,
           planned: i % 4 !== 0, // 25% plansız, 75% planlı
+          sla_hours: getSlaHours(a.zone || "3", i % 4 !== 0),
+          zone: a.zone || "3"
         })),
       });
     }
@@ -336,6 +427,8 @@ export default function CashFlowOpsPage() {
           operation: "toplama",
           amount: `₺${(Math.random() * 420000 + 230000).toFixed(0)}`,
           planned: i % 5 !== 0, // 20% plansız, 80% planlı
+          sla_hours: getSlaHours(a.zone || "3", i % 5 !== 0),
+          zone: a.zone || "3"
         })),
       });
     }
@@ -345,6 +438,53 @@ export default function CashFlowOpsPage() {
 
   return (
     <div className="space-y-4">
+      {/* Info Modal */}
+      {infoModal && (
+        <div 
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4"
+          onClick={() => setInfoModal(null)}
+        >
+          <div 
+            className="bg-[#112544] rounded-2xl p-6 max-w-2xl w-full ring-2 ring-[#2E86FF] shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-white">{infoModal.title}</h3>
+              <button
+                onClick={() => setInfoModal(null)}
+                className="text-[#A7B8D8] hover:text-white transition text-2xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+            
+            <div className="space-y-4 text-sm">
+              <div>
+                <div className="text-[#2E86FF] font-semibold mb-1">📊 Tanım</div>
+                <div className="text-[#A7B8D8] leading-relaxed">{infoModal.description}</div>
+              </div>
+              
+              <div>
+                <div className="text-[#10B981] font-semibold mb-1">🎯 Amaç</div>
+                <div className="text-[#A7B8D8] leading-relaxed">{infoModal.purpose}</div>
+              </div>
+              
+              <div>
+                <div className="text-[#F2B705] font-semibold mb-1">💡 Yorumlama</div>
+                <div className="text-[#A7B8D8] leading-relaxed">{infoModal.interpretation}</div>
+              </div>
+            </div>
+            
+            <button
+              onClick={() => setInfoModal(null)}
+              className="mt-6 w-full py-2 bg-[#2E86FF] hover:bg-[#1E5FCC] text-white rounded-lg font-semibold transition"
+            >
+              Anladım
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* AI Engine Control Panel */}
       <div className="bg-gradient-to-br from-[#1a1f3a] via-[#0E2142] to-[#1a1f3a] rounded-2xl p-6 ring-2 ring-[#2E86FF]/50 shadow-2xl">
         <div className="flex items-center justify-between mb-6">
@@ -714,23 +854,31 @@ export default function CashFlowOpsPage() {
           </div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
-          <Card label="ATMs Tracked" value={data ? data.summary.atms_tracked.toLocaleString("tr-TR") : "…"} />
-          <Card label="Total Cash (TRY)" value={data ? `₺${data.summary.total_cash_try.toLocaleString("tr-TR")}` : "…"} />
+          <Card label="ATMs Tracked" value={data ? data.summary.atms_tracked.toLocaleString("tr-TR") : "…"} infoKey="atms_tracked" onInfoClick={setInfoModal} />
+          <Card label="Total Cash (TRY)" value={data ? `₺${data.summary.total_cash_try.toLocaleString("tr-TR")}` : "…"} infoKey="total_cash" onInfoClick={setInfoModal} />
           <div onClick={() => setShowModal(true)} className="cursor-pointer hover:ring-2 hover:ring-[#2E86FF] transition rounded-2xl">
-            <Card label="Low Cash ATMs" value={data ? data.summary.low_cash_atms.toString() : "…"} />
+            <Card label="Low Cash ATMs" value={data ? data.summary.low_cash_atms.toString() : "…"} infoKey="low_cash_atms" onInfoClick={setInfoModal} />
           </div>
           <div onClick={() => setShowShortageModal(true)} className="cursor-pointer hover:ring-2 hover:ring-[#2E86FF] transition rounded-2xl">
-            <Card label="Pred. Shortage (7d)" value={data ? data.summary.predicted_shortage_7d.toString() : "…"} />
+            <Card label="Pred. Shortage (7d)" value={data ? data.summary.predicted_shortage_7d.toString() : "…"} infoKey="predicted_shortage" onInfoClick={setInfoModal} />
           </div>
           <div onClick={() => setShowReplModal(true)} className="cursor-pointer hover:ring-2 hover:ring-[#2E86FF] transition rounded-2xl">
-            <Card label="Planned Repl. (7d)" value={data ? data.summary.replenishments_planned_7d.toString() : "…"} />
+            <Card label="Planned Repl. (7d)" value={data ? data.summary.replenishments_planned_7d.toString() : "…"} infoKey="planned_replenishments" onInfoClick={setInfoModal} />
           </div>
         </div>
       </div>
 
       {/* Heat Map */}
       <div className="bg-[#112544] rounded-2xl p-4 ring-1 ring-[#2B416B]">
-        <div className="text-sm mb-3">Low Cash ATM Heat Map</div>
+        <div className="flex items-center gap-2 mb-3">
+          <div className="text-sm">Low Cash ATM Heat Map</div>
+          <button
+            onClick={() => setInfoModal(CASHFLOW_METRIC_EXPLANATIONS["heat_map"])}
+            className="w-5 h-5 rounded-full bg-[#2E86FF]/20 hover:bg-[#2E86FF]/40 text-[#2E86FF] text-xs flex items-center justify-center transition"
+          >
+            ?
+          </button>
+        </div>
         <div className="h-[360px] w-full rounded-xl overflow-hidden ring-1 ring-[#2B416B]">
           <HeatMapComponent lowCashAtms={lowCashAtms} />
         </div>
@@ -936,8 +1084,15 @@ export default function CashFlowOpsPage() {
 
           <div 
             onClick={() => {
+              // İkmal operasyonu yapılan tüm ATM'leri topla
+              const replenishmentAtmList = citRoutes.filter(r => {
+                const routeDate = r.day === "today" ? "2026-02-04" : r.day === "tomorrow" ? "2026-02-05" : "2026-02-06";
+                return routeDate >= operationDateStart && routeDate <= operationDateEnd;
+              }).flatMap(r => r.atms.filter((a: any) => a.operation === "ikmal"));
+              
+              setOperationAtms(replenishmentAtmList);
               setSelectedOperationType("replenishment");
-              setShowOperationModal(true);
+              setShowOperationMapModal(true);
             }}
             className="bg-[#0E2142]/60 rounded-xl p-5 ring-1 ring-[#2B416B] cursor-pointer hover:ring-[#10B981] transition"
           >
@@ -961,8 +1116,15 @@ export default function CashFlowOpsPage() {
 
           <div 
             onClick={() => {
+              // Para toplama operasyonu yapılan tüm ATM'leri topla
+              const collectionAtmList = citRoutes.filter(r => {
+                const routeDate = r.day === "today" ? "2026-02-04" : r.day === "tomorrow" ? "2026-02-05" : "2026-02-06";
+                return routeDate >= operationDateStart && routeDate <= operationDateEnd;
+              }).flatMap(r => r.atms.filter((a: any) => a.operation === "toplama"));
+              
+              setOperationAtms(collectionAtmList);
               setSelectedOperationType("collection");
-              setShowOperationModal(true);
+              setShowOperationMapModal(true);
             }}
             className="bg-[#0E2142]/60 rounded-xl p-5 ring-1 ring-[#2B416B] cursor-pointer hover:ring-[#F2B705] transition"
           >
@@ -1482,7 +1644,15 @@ export default function CashFlowOpsPage() {
         {/* Cash Trend Chart */}
         <div className="col-span-12 xl:col-span-7 bg-[#112544] rounded-2xl p-4 ring-1 ring-[#2B416B]">
           <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
-            <div className="text-sm text-white font-semibold">📈 Cash Trend & Forecast</div>
+            <div className="flex items-center gap-2">
+              <div className="text-sm text-white font-semibold">📈 Cash Trend & Forecast</div>
+              <button
+                onClick={() => setInfoModal(CASHFLOW_METRIC_EXPLANATIONS["cash_trend_forecast"])}
+                className="w-5 h-5 rounded-full bg-[#2E86FF]/20 hover:bg-[#2E86FF]/40 text-[#2E86FF] text-xs flex items-center justify-center transition"
+              >
+                ?
+              </button>
+            </div>
             <div className="flex gap-2 items-center flex-wrap">
               <div className="flex items-center gap-2">
                 <input
@@ -2538,6 +2708,7 @@ export default function CashFlowOpsPage() {
                       <div className="bg-[#112544] rounded-lg p-2">
                         <div className="text-xs text-[#A7B8D8]">SLA Hedef</div>
                         <div className="text-sm font-bold text-white mt-1">{atm.sla_target} saat</div>
+                        <div className="text-xs text-[#A7B8D8] mt-0.5">Zone {atm.zone} - {atm.operation_type}</div>
                       </div>
                       <div className="bg-[#8B5CF6]/10 rounded-lg p-2 ring-1 ring-[#8B5CF6]/30">
                         <div className="text-xs text-white">Aşılan Süre</div>
@@ -3345,6 +3516,101 @@ export default function CashFlowOpsPage() {
                     );
                   })
                 }
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SLA Contract Information Panel */}
+      <div className="bg-gradient-to-r from-[#2E86FF]/10 to-[#8B5CF6]/10 rounded-xl p-4 ring-1 ring-[#2E86FF]/30 mb-4">
+        <div className="flex items-start gap-3">
+          <div className="text-2xl">📋</div>
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="text-sm font-bold text-white">Sözleşme SLA Süreleri (Bölge Bazlı)</div>
+              <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-[#2E86FF]/20 text-white">Aktif</span>
+            </div>
+            <div className="text-xs text-white/80 mb-3">
+              İkmal ve Para Toplama operasyonları için bölge bazında tanımlı SLA süreleri aşağıdaki gibidir:
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+              <div className="bg-[#0E2142]/60 rounded-lg p-3 ring-1 ring-[#2B416B]">
+                <div className="text-xs text-[#A7B8D8] mb-1">Zone 1</div>
+                <div className="text-xs font-bold text-[#10B981]">Planlı: 9 saat</div>
+                <div className="text-xs font-bold text-[#F59E0B]">Plansız: 3 saat</div>
+              </div>
+              <div className="bg-[#0E2142]/60 rounded-lg p-3 ring-1 ring-[#2B416B]">
+                <div className="text-xs text-[#A7B8D8] mb-1">Zone 2</div>
+                <div className="text-xs font-bold text-[#10B981]">Planlı: 9.5 saat</div>
+                <div className="text-xs font-bold text-[#F59E0B]">Plansız: 5 saat</div>
+              </div>
+              <div className="bg-[#0E2142]/60 rounded-lg p-3 ring-1 ring-[#2B416B]">
+                <div className="text-xs text-[#A7B8D8] mb-1">Zone 3</div>
+                <div className="text-xs font-bold text-[#10B981]">Planlı: 10 saat</div>
+                <div className="text-xs font-bold text-[#F59E0B]">Plansız: 5 saat</div>
+              </div>
+              <div className="bg-[#0E2142]/60 rounded-lg p-3 ring-1 ring-[#2B416B]">
+                <div className="text-xs text-[#A7B8D8] mb-1">Zone 4</div>
+                <div className="text-xs font-bold text-[#10B981]">Planlı: 10 saat</div>
+                <div className="text-xs font-bold text-[#F59E0B]">Plansız: 5 saat</div>
+              </div>
+              <div className="bg-[#0E2142]/60 rounded-lg p-3 ring-1 ring-[#2B416B]">
+                <div className="text-xs text-[#A7B8D8] mb-1">Zone 5</div>
+                <div className="text-xs font-bold text-[#10B981]">Planlı: 10 saat</div>
+                <div className="text-xs font-bold text-[#F59E0B]">Plansız: 5 saat</div>
+              </div>
+              <div className="bg-[#0E2142]/60 rounded-lg p-3 ring-1 ring-[#2B416B]">
+                <div className="text-xs text-[#A7B8D8] mb-1">Zone 12</div>
+                <div className="text-xs font-bold text-[#10B981]">Planlı: 10 saat</div>
+                <div className="text-xs font-bold text-[#F59E0B]">Plansız: 5 saat</div>
+              </div>
+            </div>
+            <div className="text-xs text-white/60 mt-3">
+              💡 Bu süreler sözleşmede belirtilen maksimum müdahale süreleridir. SLA aşımları operasyonel performans raporlarına yansır.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Operation ATMs Map Modal */}
+      {showOperationMapModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4" style={{ zIndex: 10000 }}>
+          <div className="bg-[#112544] rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden ring-2 ring-[#2B416B]">
+            <div className="flex items-center justify-between p-4 border-b border-[#2B416B] bg-[#0E2142]/60">
+              <div className="text-lg font-semibold">
+                📍 {operationAtms[0]?.operation === "ikmal" ? "İkmal Operasyonu" : "Para Toplama"} - ATM Haritası ({operationAtms.length} ATM)
+              </div>
+              <button onClick={() => setShowOperationMapModal(false)} className="text-[#A7B8D8] hover:text-white text-2xl">&times;</button>
+            </div>
+            
+            <div className="p-4">
+              <div className="h-[600px] w-full rounded-xl overflow-hidden ring-1 ring-[#2B416B]">
+                <RouteMapComponent route={{
+                  cash_center: operationAtms[0]?.operation === "ikmal" ? "İkmal Operasyonu" : "Para Toplama",
+                  atms: operationAtms,
+                  atms_count: operationAtms.length,
+                  efficiency_score: 0
+                }} />
+              </div>
+              
+              <div className="mt-4 grid grid-cols-4 gap-3">
+                <div className="bg-[#0E2142] rounded-lg p-3 ring-1 ring-[#2B416B]">
+                  <div className="text-xs text-[#A7B8D8]">Operasyon Tipi</div>
+                  <div className="text-sm font-bold mt-1">{operationAtms[0]?.operation === "ikmal" ? "İkmal" : "Toplama"}</div>
+                </div>
+                <div className="bg-[#0E2142] rounded-lg p-3 ring-1 ring-[#2B416B]">
+                  <div className="text-xs text-[#A7B8D8]">ATM Sayısı</div>
+                  <div className="text-sm font-bold mt-1">{operationAtms.length}</div>
+                </div>
+                <div className="bg-[#0E2142] rounded-lg p-3 ring-1 ring-[#2B416B]">
+                  <div className="text-xs text-[#A7B8D8]">Tarih Aralığı</div>
+                  <div className="text-sm font-bold mt-1">{operationDateStart} - {operationDateEnd}</div>
+                </div>
+                <div className="bg-[#0E2142] rounded-lg p-3 ring-1 ring-[#2B416B]">
+                  <div className="text-xs text-[#A7B8D8]">Durum</div>
+                  <div className="text-sm font-bold mt-1 text-[#10B981]">Planlandı</div>
+                </div>
               </div>
             </div>
           </div>

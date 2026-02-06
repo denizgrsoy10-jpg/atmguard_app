@@ -25,6 +25,7 @@ type OverviewMapProps = {
   filteredAtms: ATM[];
   center: [number, number];
   top10Band: Map<string, "High" | "Medium" | "Low">;
+  top10Data: Map<string, { risk_band: "High" | "Medium" | "Low"; availability: number | undefined }>;
 };
 
 function getBandColor(band?: string) {
@@ -136,6 +137,7 @@ export default function OverviewMap({
   filteredAtms,
   center,
   top10Band,
+  top10Data,
 }: OverviewMapProps) {
   return (
     <MapContainer
@@ -177,6 +179,19 @@ export default function OverviewMap({
                 </div>
                 <div>Zone: {a.zone ?? "-"}</div>
                 <div>Risk: {band}</div>
+                {(() => {
+                  const data = top10Data.get(a.atm_id);
+                  if (data && data.availability !== undefined) {
+                    const avail = data.availability;
+                    const color = avail < 70 ? "#E63946" : avail < 90 ? "#F2B705" : "#10B981";
+                    return (
+                      <div style={{ marginTop: "4px", fontWeight: 700, color }}>
+                        ⚡ Avail: {avail.toFixed(1)}%
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </Popup>
             </Marker>
           );

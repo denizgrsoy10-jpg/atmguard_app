@@ -116,6 +116,12 @@ export default function RouteMap({ route }: RouteMapProps) {
                 <div style={{ fontSize: "12px", marginBottom: "4px" }}>
                   {atm.city} / {atm.district}
                 </div>
+                {atm.zone && (
+                  <div style={{ fontSize: "11px", opacity: 0.7, marginBottom: "4px" }}>
+                    📍 Zone {atm.zone} {atm.sla_hours && `• SLA: ${atm.sla_hours} saat`}
+                    {atm.planned !== undefined && ` • ${atm.planned ? 'Planlı' : 'Plansız'}`}
+                  </div>
+                )}
                 {isSlaExceeded && (
                   <div style={{ 
                     fontSize: "12px", 

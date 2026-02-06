@@ -15,6 +15,7 @@ export default function Tabs() {
     { href: "/trend-health", label: t.nav.trendHealth },
     { href: "/cashflow-ops", label: t.nav.cashflow },
     { href: "/command-center", label: t.nav.commandCenter },
+    { href: "/budget-performance", label: "💰 Bütçe & Tasarruf" },
   ];
 
   return (
