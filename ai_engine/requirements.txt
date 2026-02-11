@@ -1,0 +1,58 @@
+# ATM Health Guardian - AI Engine Requirements
+# Production-Grade Machine Learning Stack
+# Updated: February 2026
+
+# Core ML Libraries - State-of-the-Art Gradient Boosting
+xgboost==2.0.3              # XGBoost: Winner of most Kaggle competitions
+lightgbm==4.3.0             # LightGBM: Microsoft's ultra-fast gradient boosting
+catboost==1.2.3             # CatBoost: Yandex's algorithm for categorical features
+
+# Hyperparameter Optimization
+optuna==3.5.0               # Automated ML hyperparameter tuning
+hyperopt==0.2.7             # Bayesian optimization for ML
+
+# Time Series Forecasting
+prophet==1.1.5              # Facebook's production-ready time series
+statsmodels==0.14.1         # ARIMA, SARIMAX, statistical models
+pmdarima==2.0.4             # Auto ARIMA model selection
+
+# Deep Learning (for advanced LSTM/Transformer models)
+tensorflow==2.15.0          # Google's deep learning framework
+torch==2.2.0                # PyTorch for custom neural networks
+
+# Data Processing & Analysis
+numpy==1.26.4
+pandas==2.2.0
+scikit-learn==1.4.0         # Feature engineering, preprocessing, metrics
+
+# Model Interpretability
+shap==0.44.1                # SHapley Additive exPlanations for model transparency
+lime==0.2.0.1               # Local Interpretable Model-agnostic Explanations
+
+# Performance Monitoring
+mlflow==2.10.2              # Model tracking, versioning, deployment
+prometheus-client==0.20.0   # Metrics export for production monitoring
+
+# Data Validation
+great-expectations==0.18.8  # Data quality validation
+pandera==0.18.0             # DataFrame schema validation
+
+# Utilities
+joblib==1.3.2               # Model serialization
+tqdm==4.66.2                # Progress bars
+python-dateutil==2.8.2
+pytz==2024.1
+
+# Visualization
+matplotlib==3.8.3
+seaborn==0.13.2
+plotly==5.19.0
+
+# Configuration Management
+pyyaml==6.0.1
+python-dotenv==1.0.1
+
+# Production Server (Optional - if deploying as API)
+fastapi==0.109.2
+uvicorn==0.27.1
+pydantic==2.6.1

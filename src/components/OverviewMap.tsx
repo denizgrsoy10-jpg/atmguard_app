@@ -4,7 +4,8 @@ import "leaflet/dist/leaflet.css";
 import "leaflet.markercluster/dist/MarkerCluster.css";
 import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import { useEffect, useRef } from "react";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import MarkerClusterGroup from "react-leaflet-cluster";
 import L from "leaflet";
 
@@ -47,6 +48,19 @@ function makeAtmDotIcon(color: string, isOffsite: boolean = false) {
     iconSize: [10, 10],
     iconAnchor: [5, 5],
   });
+}
+
+function MapResizer() {
+  const map = useMap();
+  
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [map]);
+  
+  return null;
 }
 
 function getClusterIcon(cluster: any) {
@@ -143,10 +157,11 @@ export default function OverviewMap({
     <MapContainer
       center={center}
       zoom={5.6}
-      scrollWheelZoom={false}
+      scrollWheelZoom={true}
       preferCanvas={true}
       style={{ height: "100%", width: "100%" }}
     >
+      <MapResizer />
       <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
       <MarkerClusterGroup

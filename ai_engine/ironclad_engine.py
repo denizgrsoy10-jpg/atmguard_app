@@ -1,44 +1,16 @@
 """
-═══════════════════════════════════════════════════════════════════════════════
-IRONCLAD ENGINE - AURA MASTER AI
-The Self-Learning Dual-Core Intelligence System for ATM Optimization
-═══════════════════════════════════════════════════════════════════════════════
-
-PROJECT: Competition-Winning ATM Operations AI
-GOAL: >15% Cost Reduction via Predictive Maintenance + Cash Flow Optimization
-ENVIRONMENT: 100% OFFLINE - High-Security Banking Infrastructure
+IronCladEngine - Production-Grade ATM Predictive Maintenance Decision Engine
+============================================================================
 
 ARCHITECTURE:
-┌─────────────────────────────────────────────────────────────────┐
-│                      IRONCLAD ENGINE                             │
-│  ┌────────────────┐              ┌──────────────────┐          │
-│  │   HEAD A       │              │     HEAD B       │          │
-│  │  "The Doctor"  │              │  "The Accountant"│          │
-│  │                │              │                  │          │
-│  │ Classification │              │   Regression     │          │
-│  │ Failure Risk   │              │ Cash/Deposit     │          │
-│  │   (0-100%)     │              │  Time-to-Empty   │          │
-│  └────────────────┘              └──────────────────┘          │
-│           │                               │                     │
-│           └───────────┬───────────────────┘                     │
-│                       ▼                                         │
-│            ┌─────────────────────┐                             │
-│            │ OPTIMIZATION LAYER  │                             │
-│            │  "Money Saver"      │                             │
-│            │  Smart Combinations │                             │
-│            └─────────────────────┘                             │
-│                       │                                         │
-│                       ▼                                         │
-│            ┌─────────────────────┐                             │
-│            │  ONLINE LEARNING    │                             │
-│            │  + Drift Detection  │                             │
-│            │  + Auto Rollback    │                             │
-│            └─────────────────────┘                             │
-└─────────────────────────────────────────────────────────────────┘
+- Offline-First: Runs on secure bank servers without internet dependency
+- Incremental Learning: Updates model daily with new operational data
+- Dual-Core AI: Maintenance (Classification) + Cash (Regression)
+- Rule-Based Optimization: Implements strict banking business logic for 15% cost savings
 
-Author: Deniz Gursoy - ATMGuard Competition Team
-Version: 1.0 - Production Ready
-═══════════════════════════════════════════════════════════════════════════════
+AUTHOR: ATM Guard Team
+VERSION: 1.0.0 (Production)
+DATE: February 2026
 """
 
 import json
@@ -46,15 +18,20 @@ import os
 import pickle
 import shutil
 import warnings
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import xgboost as xgb
-from sklearn.metrics import (accuracy_score, log_loss, mean_absolute_error,
-                              mean_squared_error, roc_auc_score)
+from sklearn.metrics import (
+    accuracy_score,
+    log_loss,
+    mean_absolute_error,
+    mean_squared_error,
+    roc_auc_score,
+)
 from sklearn.preprocessing import StandardScaler
 
 warnings.filterwarnings('ignore')

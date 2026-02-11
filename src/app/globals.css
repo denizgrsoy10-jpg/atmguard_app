@@ -29,3 +29,17 @@ body { background: var(--bg); color: white; }
 .animate-gradient {
   animation: gradient 3s ease infinite;
 }
+
+/* Bounce slow animation for mascot */
+@keyframes bounce-slow {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+.animate-bounce-slow {
+  animation: bounce-slow 3s ease-in-out infinite;
+}

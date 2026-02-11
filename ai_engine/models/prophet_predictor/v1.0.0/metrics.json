@@ -1,0 +1,17 @@
+{
+  "model_id": "prophet_atm_predictor",
+  "version": "v1.0.0",
+  "timestamp": "2026-02-10T20:08:38.017487",
+  "mae": 12500.0,
+  "mse": 250000000.0,
+  "rmse": 15811.0,
+  "mape": 0.045,
+  "r2_score": 0.92,
+  "prediction_accuracy": 0.94,
+  "cost_savings": 8359.2,
+  "false_positives": 3,
+  "false_negatives": 2,
+  "training_samples": 2771,
+  "training_time_seconds": 125.5,
+  "model_size_mb": 2.3
+}

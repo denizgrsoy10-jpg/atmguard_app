@@ -1,7 +1,7 @@
 export const en = {
   // Navigation
   nav: {
-    overview: "Overview",
+    overview: "�️ ATM Health Guardian",
     cashflow: "Cash Flow",
     trendHealth: "Trend & Health",
     commandCenter: "Command Center",
@@ -9,7 +9,7 @@ export const en = {
 
   // Overview Page
   overview: {
-    title: "Overview",
+    title: "ATM Health Guardian - Proactive Maintenance & Performance",
     aiMotorDecisions: "AI Motor Decisions",
     aiRecommendations: "AI Motor Recommendations",
     slmRecommendations: "SLM opening recommended",
@@ -61,9 +61,7 @@ export const en = {
     route: "Route",
     atmCount: "ATMs",
     estimatedTime: "Est. Time",
-    totalCash: "Total Cash",
     efficiency: "Efficiency",
-    status: "Status",
     inProgress: "In Progress",
     completed: "Completed",
     planned: "Planned",
@@ -80,7 +78,6 @@ export const en = {
     outflow: "Outflow (₺)",
     net: "Net (₺)",
     transactions: "Transactions",
-    status: "Status",
     week: "Week",
     avgDaily: "Avg Daily",
     lowCashAtmsList: "Low Cash ATMs List",

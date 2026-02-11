@@ -595,10 +595,10 @@ export default function CommandCenterPage() {
           </div>
         </div>
 
-        {/* En Yoğun Bölgeler */}
+        {/* En Yoğun Nakit Merkezleri */}
         <div className="bg-[#0E2142]/60 rounded-xl p-5 ring-1 ring-[#2B416B]">
           <div className="text-sm font-semibold mb-4 flex items-center gap-2">
-            🔥 En Yoğun Bölgeler (Son 24 Saat)
+            🔥 En Yoğun Nakit Merkezleri (Son 24 Saat)
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             {/* Top 5 Bölgeler */}

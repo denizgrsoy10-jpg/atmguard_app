@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import "leaflet/dist/leaflet.css";
@@ -74,6 +74,7 @@ type Payload = {
     action: string;
     eta: string;
     risk: "High" | "Medium" | "Low";
+    cash_center?: string;
   }[];
 };
 
@@ -141,12 +142,14 @@ export default function CashFlowOpsPage() {
   const [operationAtms, setOperationAtms] = useState<any[]>([]);
   const [showAllRouteAtms, setShowAllRouteAtms] = useState(false);
   const [showAllNmSlaModal, setShowAllNmSlaModal] = useState(false);
+  const [showRemainingRoutesModal, setShowRemainingRoutesModal] = useState(false);
+  const [remainingRoutesData, setRemainingRoutesData] = useState<any[]>([]);
   const [slaDateStart, setSlaDateStart] = useState<string>("2026-02-01");
   const [slaDateEnd, setSlaDateEnd] = useState<string>("2026-02-04");
   const [slaExceededDateStart, setSlaExceededDateStart] = useState<string>("2026-02-04");
   const [slaExceededDateEnd, setSlaExceededDateEnd] = useState<string>("2026-02-04");
   const [operationDateStart, setOperationDateStart] = useState<string>("2026-02-04");
-  const [operationDateEnd, setOperationDateEnd] = useState<string>("2026-02-04");
+  const [operationDateEnd, setOperationDateEnd] = useState<string>("2026-02-06");
   const [cashFlowDateStart, setCashFlowDateStart] = useState<string>("2026-02-01");
   const [cashFlowDateEnd, setCashFlowDateEnd] = useState<string>("2026-02-04");
   const [trendDateStart, setTrendDateStart] = useState<string>("2026-01-28");
@@ -155,13 +158,18 @@ export default function CashFlowOpsPage() {
   const [summaryDateEnd, setSummaryDateEnd] = useState<string>("2026-02-11");
   const [topActionsDateStart, setTopActionsDateStart] = useState<string>("2026-02-04");
   const [topActionsDateEnd, setTopActionsDateEnd] = useState<string>("2026-02-11");
+  
+  // Heat Map tarih aralığı ve tam ekran
+  const [heatMapStartDate, setHeatMapStartDate] = useState<string>("2026-02-01");
+  const [heatMapEndDate, setHeatMapEndDate] = useState<string>("2026-02-04");
+  const [fullscreenHeatMap, setFullscreenHeatMap] = useState(false);
 
   // AI Manual Override Rules
   const [manualCashLimit, setManualCashLimit] = useState<string>("350");
   const [manualRuleDescription, setManualRuleDescription] = useState<string>("");
 
   // AI Engine states
-  const [aiEngineEnabled, setAiEngineEnabled] = useState<boolean>(true);
+  const [aiEngineEnabled, setAiEngineEnabled] = useState<boolean>(false);
   const [aiEngineMode, setAiEngineMode] = useState<"auto" | "manual">("auto");
   const [aiEngineStatus, setAiEngineStatus] = useState<"active" | "optimizing" | "idle">("active");
 
@@ -180,19 +188,76 @@ export default function CashFlowOpsPage() {
     return isPlanned ? zoneSla.planned : zoneSla.unplanned;
   };
 
+  // Filtrelenmiş rotalar - selectedCashCenter'a göre
+  const filteredRoutes = useMemo(() => {
+    if (!selectedCashCenter) {
+      return citRoutes; // Seçili merkez yoksa tüm rotalar
+    }
+    return citRoutes.filter(r => r.cash_center === selectedCashCenter);
+  }, [citRoutes, selectedCashCenter]);
+
 
   useEffect(() => {
     let alive = true;
     (async () => {
       const r = await fetch("/api/cashflow", { cache: "no-store" });
       const j = (await r.json()) as Payload;
-      if (!alive) return;
-      setData(j);
-
+      
       // Fetch ATMs for low cash list
       const atmRes = await fetch("/api/atm-master", { cache: "no-store" });
       const atmData = await atmRes.json();
       const atms = (atmData.atms || []).filter((a: any) => a.active !== false);
+      
+      // Enrich top_actions with cash_center info from atms
+      if (j.top_actions) {
+        j.top_actions = j.top_actions.map((action: any) => {
+          const atmInfo = atms.find((a: any) => String(a.atm_id) === String(action.atm_id));
+          return {
+            ...action,
+            cash_center: atmInfo?.cash_center || "BELİRSİZ"
+          };
+        });
+      }
+      
+      // Add demo priority actions for each major cash center
+      const priorityCashCenterGroups: Record<string, any[]> = {};
+      atms.forEach((atm: any) => {
+        const cc = atm.cash_center || "BELİRSİZ";
+        if (!priorityCashCenterGroups[cc]) {
+          priorityCashCenterGroups[cc] = [];
+        }
+        priorityCashCenterGroups[cc].push(atm);
+      });
+      
+      // Get major cash centers with OFFSITE ATMs
+      const priorityMajorCashCenters = Object.entries(priorityCashCenterGroups)
+        .filter(([cc, ccAtms]) => cc !== "ŞUBE" && ccAtms.some((a: any) => a.location_type === "Offsite"))
+        .sort((a, b) => b[1].length - a[1].length)
+        .slice(0, 5); // Top 5 cash centers
+      
+      const demoPriorityActions: any[] = [];
+      priorityMajorCashCenters.forEach(([cashCenter, ccAtms]) => {
+        const offsiteAtms = ccAtms.filter((a: any) => a.location_type === "Offsite").slice(0, 3);
+        offsiteAtms.forEach((atm: any, idx: number) => {
+          demoPriorityActions.push({
+            atm_id: atm.atm_id,
+            atm_name: atm.atm_name || "N/A",
+            city: atm.city,
+            district: atm.district,
+            action: idx === 0 ? "Refill Now" : idx === 1 ? "Schedule Maintenance" : "Monitor",
+            eta: idx === 0 ? "2 hours" : idx === 1 ? "4 hours" : "1 day",
+            risk: idx === 0 ? "High" : idx === 1 ? "Medium" : "Low",
+            cash_center: cashCenter
+          });
+        });
+      });
+      
+      if (demoPriorityActions.length > 0) {
+        j.top_actions = [...demoPriorityActions, ...(j.top_actions || [])];
+      }
+      
+      if (!alive) return;
+      setData(j);
       const lowCash = atms.slice(0, 74).map((a: any) => ({
         atm_id: String(a.atm_id),
         atm_name: a.atm_name || "N/A",
@@ -339,8 +404,29 @@ export default function CashFlowOpsPage() {
     // Create 3 routes for this NM: today, tomorrow, later
     const routes = [];
     
-    // Today route
-    const todayOffsiteAtms = centerAtms.filter((a: any) => a.location_type === "Offsite").slice(0, 15);
+    // Get all offsite ATMs for this cash center
+    const allOffsiteAtms = centerAtms.filter((a: any) => a.location_type === "Offsite");
+    
+    // If not enough ATMs, duplicate some to ensure all 3 routes have data
+    const minAtmsPerRoute = 8;
+    const requiredTotal = 40; // Need at least 40 to cover all slices
+    let workingAtms = [...allOffsiteAtms];
+    
+    // Duplicate ATMs multiple times if needed to ensure all routes have data
+    while (workingAtms.length < requiredTotal && allOffsiteAtms.length > 0) {
+      workingAtms = [...workingAtms, ...allOffsiteAtms];
+    }
+    
+    // If still not enough, keep duplicating until we have 40
+    if (workingAtms.length < requiredTotal && allOffsiteAtms.length > 0) {
+      const remaining = requiredTotal - workingAtms.length;
+      for (let i = 0; i < remaining; i++) {
+        workingAtms.push(allOffsiteAtms[i % allOffsiteAtms.length]);
+      }
+    }
+    
+    // Today route - Replenishment (İkmal)
+    const todayOffsiteAtms = workingAtms.slice(0, 15);
     if (todayOffsiteAtms.length > 0) {
       routes.push({
         id: `R1-${cashCenter}`,
@@ -370,8 +456,8 @@ export default function CashFlowOpsPage() {
       });
     }
     
-    // Tomorrow route
-    const tomorrowOffsiteAtms = centerAtms.filter((a: any) => a.location_type === "Offsite").slice(15, 33);
+    // Tomorrow route - Mixed (Karışık: ikmal + toplama)
+    const tomorrowOffsiteAtms = workingAtms.slice(15, 28);
     if (tomorrowOffsiteAtms.length > 0) {
       routes.push({
         id: `R2-${cashCenter}`,
@@ -401,37 +487,54 @@ export default function CashFlowOpsPage() {
       });
     }
     
-    // Later route
-    const laterOffsiteAtms = centerAtms.filter((a: any) => a.location_type === "Offsite").slice(33, 47);
-    if (laterOffsiteAtms.length > 0) {
-      routes.push({
-        id: `R3-${cashCenter}`,
-        name: `${cashCenter} NM Rotası`,
-        cash_center: cashCenter,
-        day: "later",
-        planned_date: "5 Şubat (2 gün sonra)",
-        cit_company: "BANTAŞ",
-        team: `CIT Team ${teams[2]}`,
-        vehicle: vehicles[2],
-        operation_type: "collection",
-        status: "planned",
-        progress: 0,
-        atms_count: laterOffsiteAtms.length,
-        completed: 0,
-        efficiency_score: 80 + Math.floor(Math.random() * 9),
-        estimated_time: `${(laterOffsiteAtms.length * 0.27).toFixed(1)}h`,
-        total_cash: `₺${(laterOffsiteAtms.length * 400000 + Math.random() * 550000).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`,
-        atms: laterOffsiteAtms.map((a: any, i: number) => ({
-          ...a,
-          order: i + 1,
-          operation: "toplama",
-          amount: `₺${(Math.random() * 420000 + 230000).toFixed(0)}`,
-          planned: i % 5 !== 0, // 20% plansız, 80% planlı
-          sla_hours: getSlaHours(a.zone || "3", i % 5 !== 0),
-          zone: a.zone || "3"
-        })),
-      });
+    // Later route - Collection (Toplama) - ALWAYS create this route
+    // Ensure we have at least 12 ATMs for collection route
+    let laterOffsiteAtms = workingAtms.slice(28, 40);
+    
+    // If slice is empty or too small, take from beginning and duplicate
+    if (laterOffsiteAtms.length < 12 && workingAtms.length > 0) {
+      laterOffsiteAtms = [];
+      for (let i = 0; i < 12; i++) {
+        laterOffsiteAtms.push(workingAtms[i % workingAtms.length]);
+      }
     }
+    
+    console.log('🔍 DEBUG Collection Route:', {
+      cashCenter,
+      allOffsiteCount: allOffsiteAtms.length,
+      workingAtmsCount: workingAtms.length,
+      laterOffsiteCount: laterOffsiteAtms.length,
+      laterAtmIds: laterOffsiteAtms.map(a => a.atm_id).slice(0, 5) // First 5 for brevity
+    });
+    
+    // Always add collection route with at least 12 ATMs
+    routes.push({
+      id: `R3-${cashCenter}`,
+      name: `${cashCenter} NM Rotası`,
+      cash_center: cashCenter,
+      day: "later",
+      planned_date: "5 Şubat (2 gün sonra)",
+      cit_company: "BANTAŞ",
+      team: `CIT Team ${teams[2]}`,
+      vehicle: vehicles[2],
+      operation_type: "collection",
+      status: "planned",
+      progress: 0,
+      atms_count: laterOffsiteAtms.length,
+      completed: 0,
+      efficiency_score: 80 + Math.floor(Math.random() * 9),
+      estimated_time: `${(laterOffsiteAtms.length * 0.27).toFixed(1)}h`,
+      total_cash: `₺${(laterOffsiteAtms.length * 400000 + Math.random() * 550000).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`,
+      atms: laterOffsiteAtms.map((a: any, i: number) => ({
+        ...a,
+        order: i + 1,
+        operation: "toplama",
+        amount: `₺${(Math.random() * 420000 + 230000).toFixed(0)}`,
+        planned: i % 5 !== 0, // 20% plansız, 80% planlı
+        sla_hours: getSlaHours(a.zone || "3", i % 5 !== 0),
+        zone: a.zone || "3"
+      })),
+    });
       
     setCitRoutes(routes);
   }, [allCashCenterGroups, selectedCashCenter]);
@@ -518,9 +621,9 @@ export default function CashFlowOpsPage() {
               )}
             </div>
             <div>
-              <div className="text-2xl font-bold text-white mb-1">AI Cash Optimization Engine</div>
+              <div className="text-2xl font-bold text-white mb-1">💰 AI Cash Optimization Engine / Yapay Zeka Nakit Optimizasyon Motoru</div>
               <div className="text-sm text-[#A7B8D8]">
-                Yapay Zeka ile Akıllı Nakit Yönetimi - Dünya Standardı
+                Yapay Zeka ile Akıllı Nakit Yönetimi - Dünya Standardı / AI-Powered Smart Cash Management - World Standard
               </div>
             </div>
           </div>
@@ -718,10 +821,18 @@ export default function CashFlowOpsPage() {
               </div>
               <div className="space-y-3 max-h-64 overflow-y-auto">
                 {[
-                  { id: 1, type: "collection", atm: "ATM-4521", location: "Kadıköy/Moda", priority: "high", reason: "Kaset %89 dolu (Cuma öğleden sonra maaş yoğunluğu tahmini)", eta: "18:00", confidence: 96 },
-                  { id: 2, type: "collection", atm: "ATM-8734", location: "Beşiktaş/Levent", priority: "high", reason: "Hafta sonu + AVM lokasyonu, %91 doluluk", eta: "16:30", confidence: 94 },
-                  { id: 3, type: "collection", atm: "ATM-2198", location: "Şişli/Mecidiyeköy", priority: "medium", reason: "İş merkezi - Cuma akşam yoğunluk paterni", eta: "19:00", confidence: 92 },
-                  { id: 4, type: "replenishment", atm: "ATM-6642", location: "Sarıyer/İstinye", priority: "low", reason: "Pazartesi sabahı tükenmeden önleyici ikmal", eta: "Pzr 22:00", confidence: 88 },
+                  { id: 1, type: "collection", atmId: "FA026", atmName: "BATI ATASEHIR SUBE 2", city: "İstanbul", district: "Ataşehir", priority: "high", reason: "Kaset %89 dolu (Cuma öğleden sonra maaş yoğunluğu tahmini)", eta: "18:00", confidence: 96 },
+                  { id: 2, type: "collection", atmId: "FA032", atmName: "41 DARICA EMEK", city: "Kocaeli", district: "Darıca", priority: "high", reason: "Hafta sonu + Finbor lokasyonu, %91 doluluk", eta: "16:30", confidence: 94 },
+                  { id: 3, type: "collection", atmId: "FA025", atmName: "01 SARICAM H.SABANCI OSB", city: "Adana", district: "Sarıçam", priority: "medium", reason: "Organize sanayi bölgesi - Cuma akşam yoğunluk paterni", eta: "19:00", confidence: 92 },
+                  { id: 4, type: "collection", atmId: "FA034", atmName: "16 BURSA FOMARA", city: "Bursa", district: "Nilüfer", priority: "high", reason: "AVM lokasyonu - Cumartesi alışveriş yoğunluğu, %87 doluluk", eta: "17:00", confidence: 93 },
+                  { id: 5, type: "replenishment", atmId: "FA018", atmName: "07 ALANYA OTOGAR", city: "Antalya", district: "Alanya", priority: "medium", reason: "Pazartesi sabahı tükenmeden önleyici ikmal", eta: "Pzr 22:00", confidence: 88 },
+                  { id: 6, type: "collection", atmId: "FA023", atmName: "35 KONAK KEMERALT", city: "İzmir", district: "Konak", priority: "high", reason: "Tarihi çarşı bölgesi - Hafta sonu turist yoğunluğu, %90 doluluk", eta: "15:30", confidence: 95 },
+                  { id: 7, type: "replenishment", atmId: "FA006", atmName: "06 ANKARA KIZILAY", city: "Ankara", district: "Çankaya", priority: "high", reason: "Metro istasyonu - Pazartesi sabah trafiği öncesi kritik seviye", eta: "Pzr 23:00", confidence: 91 },
+                  { id: 8, type: "collection", atmId: "FA024", atmName: "41 GEBZE ORGANIZE", city: "Kocaeli", district: "Gebze", priority: "medium", reason: "Sanayi bölgesi - Haftalık maaş ödemesi sonrası, %84 doluluk", eta: "19:30", confidence: 89 },
+                  { id: 9, type: "replenishment", atmId: "FA019", atmName: "01 ANTALYA HAVALIMANI", city: "Antalya", district: "Serik", priority: "medium", reason: "Havalimanı - Pazar akşam uçuş yoğunluğu öncesi", eta: "Paz 20:00", confidence: 87 },
+                  { id: 10, type: "collection", atmId: "FA033", atmName: "27 S.BEY KARATAS PO 2", city: "Gaziantep", district: "Şahinbey", priority: "medium", reason: "Petrol ofisi - Hafta sonu seyahat trafiği, %86 doluluk", eta: "18:30", confidence: 90 },
+                  { id: 11, type: "replenishment", atmId: "FA015", atmName: "16 KADIKOY ISKELE", city: "İstanbul", district: "Kadıköy", priority: "low", reason: "Vapur iskelesi - Pazartesi sabah yolcu yoğunluğu", eta: "Pzr 21:30", confidence: 85 },
+                  { id: 12, type: "collection", atmId: "FA028", atmName: "07 IZMIR ALSANCAK", city: "İzmir", district: "Konak", priority: "medium", reason: "Tren garı yakını - Hafta sonu seyahat yoğunluğu, %88 doluluk", eta: "17:30", confidence: 91 },
                 ].map((rec) => (
                   <div key={rec.id} className="bg-[#112544]/60 rounded-lg p-4 ring-1 ring-[#2B416B] hover:ring-[#2E86FF] transition">
                     <div className="flex items-start justify-between mb-2">
@@ -731,7 +842,7 @@ export default function CashFlowOpsPage() {
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
-                            <span className="font-bold text-white">{rec.atm}</span>
+                            <span className="font-bold text-white text-sm">{rec.atmId} - {rec.atmName}</span>
                             <span className={`px-2 py-0.5 rounded text-xs font-bold ${
                               rec.priority === 'high' ? 'bg-[#F2B705]/20 text-[#F2B705]' : 
                               rec.priority === 'medium' ? 'bg-[#2E86FF]/20 text-[#2E86FF]' : 
@@ -740,7 +851,7 @@ export default function CashFlowOpsPage() {
                               {rec.priority === 'high' ? 'Yüksek' : rec.priority === 'medium' ? 'Orta' : 'Düşük'}
                             </span>
                           </div>
-                          <div className="text-xs text-[#A7B8D8] mt-1">{rec.location}</div>
+                          <div className="text-xs text-[#A7B8D8] mt-1">{rec.city} / {rec.district}</div>
                         </div>
                       </div>
                       <div className="text-right">
@@ -869,18 +980,108 @@ export default function CashFlowOpsPage() {
       </div>
 
       {/* Heat Map */}
-      <div className="bg-[#112544] rounded-2xl p-4 ring-1 ring-[#2B416B]">
-        <div className="flex items-center gap-2 mb-3">
-          <div className="text-sm">Low Cash ATM Heat Map</div>
-          <button
-            onClick={() => setInfoModal(CASHFLOW_METRIC_EXPLANATIONS["heat_map"])}
-            className="w-5 h-5 rounded-full bg-[#2E86FF]/20 hover:bg-[#2E86FF]/40 text-[#2E86FF] text-xs flex items-center justify-center transition"
-          >
-            ?
-          </button>
+      {!fullscreenHeatMap && (
+        <div className="bg-[#112544] rounded-2xl p-4 ring-1 ring-[#2B416B]">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <div className="text-sm">Low Cash ATM Heat Map</div>
+              <button
+                onClick={() => setInfoModal(CASHFLOW_METRIC_EXPLANATIONS["heat_map"])}
+                className="w-5 h-5 rounded-full bg-[#2E86FF]/20 hover:bg-[#2E86FF]/40 text-[#2E86FF] text-xs flex items-center justify-center transition"
+              >
+                ?
+              </button>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 bg-[#0E2142] rounded-lg px-2 py-1">
+                <span className="text-[10px] text-[#A7B8D8]">Başlangıç:</span>
+                <input
+                  type="date"
+                  value={heatMapStartDate}
+                  onChange={(e) => setHeatMapStartDate(e.target.value)}
+                  className="bg-transparent text-white text-[10px] border-none focus:outline-none w-24"
+                />
+              </div>
+              <div className="flex items-center gap-2 bg-[#0E2142] rounded-lg px-2 py-1">
+                <span className="text-[10px] text-[#A7B8D8]">Bitiş:</span>
+                <input
+                  type="date"
+                  value={heatMapEndDate}
+                  onChange={(e) => setHeatMapEndDate(e.target.value)}
+                  className="bg-transparent text-white text-[10px] border-none focus:outline-none w-24"
+                />
+              </div>
+              <button
+                onClick={() => {
+                  const csvContent = '\uFEFFDüşük Nakit ATM Haritası Raporu\n' +
+                    'Rapor Tarihi: ' + new Date().toLocaleDateString('tr-TR') + '\n' +
+                    'Tarih Aralığı: ' + heatMapStartDate + ' - ' + heatMapEndDate + '\n\n' +
+                    'ATM ID,ATM Adı,Şehir,İlçe,Nakit Seviyesi (%),Risk Durumu,Latitude,Longitude\n' +
+                    lowCashAtms.map(atm => {
+                      const riskLevel = atm.cash_level < 20 ? 'Kritik' : atm.cash_level < 30 ? 'Düşük' : 'Normal';
+                      return `${atm.atm_id},${atm.atm_name},${atm.city},${atm.district},${atm.cash_level}%,${riskLevel},${atm.latitude},${atm.longitude}`;
+                    }).join('\n') +
+                    '\n\nRisk Seviyesi Tanımları:\n' +
+                    'Kritik,< 20%,Acil ikmal gerekli - CIT planlanmalı\n' +
+                    'Düşük,20-30%,Yakın takip - İkmal planına alınmalı\n' +
+                    'Normal,> 30%,Stabil durum - Normal izleme\n\n' +
+                    'Özet İstatistikler:\n' +
+                    'Toplam Düşük Nakit ATM,' + lowCashAtms.length + '\n' +
+                    'Kritik Risk,' + lowCashAtms.filter(a => a.cash_level < 20).length + '\n' +
+                    'Düşük Risk,' + lowCashAtms.filter(a => a.cash_level >= 20 && a.cash_level < 30).length + '\n' +
+                    'Normal,' + lowCashAtms.filter(a => a.cash_level >= 30).length + '\n\n' +
+                    'Şehir Bazlı Dağılım:\n' +
+                    [...new Set(lowCashAtms.map(a => a.city))].map(city => {
+                      const cityAtms = lowCashAtms.filter(a => a.city === city);
+                      return city + ',' + cityAtms.length + ' ATM';
+                    }).join('\n') +
+                    '\n\nRapor Oluşturan: AI Cash Optimization Engine\n' +
+                    'Sistem: IronClad Cash Flow Manager';
+                  
+                  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                  const link = document.createElement('a');
+                  link.href = URL.createObjectURL(blob);
+                  link.download = `low_cash_heat_map_${new Date().toISOString().split('T')[0]}.csv`;
+                  link.click();
+                }}
+                className="px-2 py-1 bg-[#2E86FF] hover:bg-[#1F6FE0] text-white text-[10px] font-semibold rounded-lg transition flex items-center gap-1"
+              >
+                📊 Excel
+              </button>
+              <button
+                onClick={() => setFullscreenHeatMap(true)}
+                className="px-2 py-1 bg-[#10B981] hover:bg-[#059669] text-white text-[10px] font-semibold rounded-lg transition flex items-center gap-1"
+              >
+                🔍 Tam Ekran
+              </button>
+            </div>
+          </div>
+          <div className="h-[360px] w-full rounded-xl overflow-hidden ring-1 ring-[#2B416B]">
+            <HeatMapComponent lowCashAtms={lowCashAtms} />
+          </div>
         </div>
-        <div className="h-[360px] w-full rounded-xl overflow-hidden ring-1 ring-[#2B416B]">
-          <HeatMapComponent lowCashAtms={lowCashAtms} />
+      )}
+
+      {/* SLA Exceeded ATMs Alert - Moved from Operational Summary */}
+      <div 
+        onClick={() => setShowSlaExceededModal(true)}
+        className="bg-gradient-to-r from-[#E63946]/10 to-[#8B5CF6]/10 rounded-xl p-4 ring-1 ring-[#8B5CF6]/50 cursor-pointer hover:ring-[#8B5CF6] transition mb-4"
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="text-3xl">⚠️</div>
+            <div>
+              <div className="text-sm font-semibold text-white">SLA Süresi Aşan ATM'ler</div>
+              <div className="text-xs text-white/60 mt-1">Acil müdahale gerekli - Tıklayarak detayları görüntüleyin</div>
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-4xl font-bold text-[#E63946]">
+              {slaExceededAtms.length}
+            </div>
+            <div className="text-xs text-[#A7B8D8] mt-1">ATM</div>
+          </div>
         </div>
       </div>
 
@@ -931,7 +1132,13 @@ export default function CashFlowOpsPage() {
                   <div className="text-xs text-[#10B981] mb-1">✓ Biten</div>
                   <div className="text-2xl font-bold text-[#10B981]">{completedRoutes.length}</div>
                 </div>
-                <div className="bg-[#F2B705]/10 rounded-lg p-3 ring-1 ring-[#F2B705]/30">
+                <div 
+                  onClick={() => {
+                    setRemainingRoutesData(remainingRoutes);
+                    setShowRemainingRoutesModal(true);
+                  }}
+                  className="bg-[#F2B705]/10 rounded-lg p-3 ring-1 ring-[#F2B705]/30 cursor-pointer hover:bg-[#F2B705]/20 hover:ring-[#F2B705]/50 transition"
+                >
                   <div className="text-xs text-[#F2B705] mb-1">⏳ Kalan</div>
                   <div className="text-2xl font-bold text-[#F2B705]">{remainingRoutes.length}</div>
                 </div>
@@ -1008,23 +1215,24 @@ export default function CashFlowOpsPage() {
                   const dateRangeLabel = `${formatDate(operationDateStart)} - ${formatDate(operationDateEnd)}`;
                   const daysDiff = Math.floor((new Date(operationDateEnd).getTime() - new Date(operationDateStart).getTime()) / (1000 * 60 * 60 * 24));
                   
-                  const filteredRoutes = citRoutes.filter(r => {
+                  // Seçili merkeze göre filtreleme
+                  const baseRoutes = selectedCashCenter ? citRoutes.filter(r => r.cash_center === selectedCashCenter) : citRoutes;
+                  const dateFilteredRoutes = baseRoutes.filter(r => {
                     const routeDate = r.day === "today" ? "2026-02-04" : 
                                      r.day === "tomorrow" ? "2026-02-05" : "2026-02-06";
                     return routeDate >= operationDateStart && routeDate <= operationDateEnd;
                   });
                   
-                  const replenishmentAtms = filteredRoutes.reduce((sum, r) => sum + r.atms.filter((a: any) => a.operation === "ikmal").length, 0);
-                  const collectionAtms = filteredRoutes.reduce((sum, r) => sum + r.atms.filter((a: any) => a.operation === "toplama").length, 0);
-                  const replenishmentRoutes = filteredRoutes.filter(r => r.operation_type === "replenishment").length;
-                  const collectionRoutes = filteredRoutes.filter(r => r.operation_type === "collection").length;
-                  const avgEfficiency = filteredRoutes.length > 0 ? (filteredRoutes.reduce((sum, r) => sum + r.efficiency_score, 0) / filteredRoutes.length).toFixed(1) : "0";
+                  const replenishmentAtms = dateFilteredRoutes.reduce((sum, r) => sum + r.atms.filter((a: any) => a.operation === "ikmal").length, 0);
+                  const collectionAtms = dateFilteredRoutes.reduce((sum, r) => sum + r.atms.filter((a: any) => a.operation === "toplama").length, 0);
+                  const replenishmentRoutes = dateFilteredRoutes.filter(r => r.operation_type === "replenishment").length;
+                  const collectionRoutes = dateFilteredRoutes.filter(r => r.operation_type === "collection").length;
+                  const avgEfficiency = dateFilteredRoutes.length > 0 ? (dateFilteredRoutes.reduce((sum, r) => sum + r.efficiency_score, 0) / dateFilteredRoutes.length).toFixed(1) : "0";
                   
                   // Create CSV content
-                  let csvContent = `Operasyonel Özet Raporu\nTarih Aralığı: ${dateRangeLabel}\nRapor Süresi: ${daysDiff + 1} Gün\n\n`;
+                  let csvContent = `Operasyonel Özet Raporu${selectedCashCenter ? `\nNakit Merkezi: ${selectedCashCenter}` : ''}\nTarih Aralığı: ${dateRangeLabel}\nRapor Süresi: ${daysDiff + 1} Gün\n\n`;
                   csvContent += "Metrik,Değer\n";
-                  csvContent += `Toplam NM Sayısı,${allCashCenterGroups.length}\n`;
-                  csvContent += `Aktif Rota Sayısı,${filteredRoutes.length}\n`;
+                  csvContent += `Aktif Rota Sayısı,${dateFilteredRoutes.length}\n`;
                   csvContent += `SLA Süresi Aşan ATM,${slaExceededAtms.length}\n`;
                   csvContent += `İkmal Operasyonu ATM,${replenishmentAtms}\n`;
                   csvContent += `İkmal Rota Sayısı,${replenishmentRoutes}\n`;
@@ -1052,40 +1260,11 @@ export default function CashFlowOpsPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <div className="bg-[#0E2142]/60 rounded-xl p-5 ring-1 ring-[#2B416B]">
-            <div className="flex items-start justify-between mb-3">
-              <div className="text-sm text-[#A7B8D8]">Toplam NM Sayısı</div>
-              <div className="text-2xl">🏦</div>
-            </div>
-            <div className="text-3xl font-bold text-white mb-1">
-              {allCashCenterGroups.length}
-            </div>
-            <div className="text-xs text-[#10B981]">
-              ↗ {citRoutes.length} aktif rota
-            </div>
-          </div>
-
-          <div 
-            onClick={() => setShowSlaExceededModal(true)}
-            className="bg-[#0E2142]/60 rounded-xl p-5 ring-1 ring-[#8B5CF6]/50 cursor-pointer hover:ring-[#8B5CF6] transition"
-          >
-            <div className="flex items-start justify-between mb-3">
-              <div className="text-sm text-[#A7B8D8]">SLA Süresi Aşan</div>
-              <div className="text-2xl">⚠️</div>
-            </div>
-            <div className="text-3xl font-bold text-white mb-1">
-              {slaExceededAtms.length}
-            </div>
-            <div className="text-xs text-white">
-              ⏰ Acil müdahale gerekli
-            </div>
-          </div>
-
+        <div className="grid grid-cols-2 lg:grid-cols-2 gap-4 mb-6">
           <div 
             onClick={() => {
               // İkmal operasyonu yapılan tüm ATM'leri topla
-              const replenishmentAtmList = citRoutes.filter(r => {
+              const replenishmentAtmList = filteredRoutes.filter(r => {
                 const routeDate = r.day === "today" ? "2026-02-04" : r.day === "tomorrow" ? "2026-02-05" : "2026-02-06";
                 return routeDate >= operationDateStart && routeDate <= operationDateEnd;
               }).flatMap(r => r.atms.filter((a: any) => a.operation === "ikmal"));
@@ -1101,13 +1280,13 @@ export default function CashFlowOpsPage() {
               <div className="text-2xl">💵</div>
             </div>
             <div className="text-3xl font-bold text-[#10B981] mb-1">
-              {citRoutes.filter(r => {
+              {filteredRoutes.filter(r => {
                 const routeDate = r.day === "today" ? "2026-02-04" : r.day === "tomorrow" ? "2026-02-05" : "2026-02-06";
                 return routeDate >= operationDateStart && routeDate <= operationDateEnd;
               }).reduce((sum, r) => sum + r.atms.filter((a: any) => a.operation === "ikmal").length, 0)}
             </div>
             <div className="text-xs text-white/60">
-              {citRoutes.filter(r => {
+              {filteredRoutes.filter(r => {
                 const routeDate = r.day === "today" ? "2026-02-04" : r.day === "tomorrow" ? "2026-02-05" : "2026-02-06";
                 return routeDate >= operationDateStart && routeDate <= operationDateEnd && r.operation_type === "replenishment";
               }).length} rota
@@ -1117,7 +1296,7 @@ export default function CashFlowOpsPage() {
           <div 
             onClick={() => {
               // Para toplama operasyonu yapılan tüm ATM'leri topla
-              const collectionAtmList = citRoutes.filter(r => {
+              const collectionAtmList = filteredRoutes.filter(r => {
                 const routeDate = r.day === "today" ? "2026-02-04" : r.day === "tomorrow" ? "2026-02-05" : "2026-02-06";
                 return routeDate >= operationDateStart && routeDate <= operationDateEnd;
               }).flatMap(r => r.atms.filter((a: any) => a.operation === "toplama"));
@@ -1133,13 +1312,13 @@ export default function CashFlowOpsPage() {
               <div className="text-2xl">🚛</div>
             </div>
             <div className="text-3xl font-bold text-[#F2B705] mb-1">
-              {citRoutes.filter(r => {
+              {filteredRoutes.filter(r => {
                 const routeDate = r.day === "today" ? "2026-02-04" : r.day === "tomorrow" ? "2026-02-05" : "2026-02-06";
                 return routeDate >= operationDateStart && routeDate <= operationDateEnd;
               }).reduce((sum, r) => sum + r.atms.filter((a: any) => a.operation === "toplama").length, 0)}
             </div>
             <div className="text-xs text-white/60">
-              {citRoutes.filter(r => {
+              {filteredRoutes.filter(r => {
                 const routeDate = r.day === "today" ? "2026-02-04" : r.day === "tomorrow" ? "2026-02-05" : "2026-02-06";
                 return routeDate >= operationDateStart && routeDate <= operationDateEnd && r.operation_type === "collection";
               }).length} rota
@@ -1158,7 +1337,7 @@ export default function CashFlowOpsPage() {
               </div>
             </div>
             <div className="text-4xl font-bold text-[#10B981]">
-              {(citRoutes.reduce((sum, r) => sum + r.efficiency_score, 0) / citRoutes.length).toFixed(0)}%
+              {filteredRoutes.length > 0 ? (filteredRoutes.reduce((sum, r) => sum + r.efficiency_score, 0) / filteredRoutes.length).toFixed(0) : 0}%
             </div>
           </div>
         </div>
@@ -1176,36 +1355,36 @@ export default function CashFlowOpsPage() {
                 <div>
                   <div className="flex justify-between text-xs mb-1">
                     <span className="text-[#10B981]">İkmal</span>
-                    <span className="text-white font-semibold">{citRoutes.filter(r => r.operation_type === "replenishment").length}</span>
+                    <span className="text-white font-semibold">{filteredRoutes.filter(r => r.operation_type === "replenishment").length}</span>
                   </div>
                   <div className="h-2 w-full bg-[#112544] rounded-full overflow-hidden">
                     <div 
                       className="h-2 bg-[#10B981] rounded-full"
-                      style={{ width: `${(citRoutes.filter(r => r.operation_type === "replenishment").length / citRoutes.length) * 100}%` }}
+                      style={{ width: `${filteredRoutes.length > 0 ? (filteredRoutes.filter(r => r.operation_type === "replenishment").length / filteredRoutes.length) * 100 : 0}%` }}
                     />
                   </div>
                 </div>
                 <div>
                   <div className="flex justify-between text-xs mb-1">
                     <span className="text-[#F2B705]">Para Toplama</span>
-                    <span className="text-white font-semibold">{citRoutes.filter(r => r.operation_type === "collection").length}</span>
+                    <span className="text-white font-semibold">{filteredRoutes.filter(r => r.operation_type === "collection").length}</span>
                   </div>
                   <div className="h-2 w-full bg-[#112544] rounded-full overflow-hidden">
                     <div 
                       className="h-2 bg-[#F2B705] rounded-full"
-                      style={{ width: `${(citRoutes.filter(r => r.operation_type === "collection").length / citRoutes.length) * 100}%` }}
+                      style={{ width: `${filteredRoutes.length > 0 ? (filteredRoutes.filter(r => r.operation_type === "collection").length / filteredRoutes.length) * 100 : 0}%` }}
                     />
                   </div>
                 </div>
                 <div>
                   <div className="flex justify-between text-xs mb-1">
                     <span className="text-[#2E86FF]">Karma</span>
-                    <span className="text-white font-semibold">{citRoutes.filter(r => r.operation_type === "mixed").length}</span>
+                    <span className="text-white font-semibold">{filteredRoutes.filter(r => r.operation_type === "mixed").length}</span>
                   </div>
                   <div className="h-2 w-full bg-[#112544] rounded-full overflow-hidden">
                     <div 
                       className="h-2 bg-[#2E86FF] rounded-full"
-                      style={{ width: `${(citRoutes.filter(r => r.operation_type === "mixed").length / citRoutes.length) * 100}%` }}
+                      style={{ width: `${filteredRoutes.length > 0 ? (filteredRoutes.filter(r => r.operation_type === "mixed").length / filteredRoutes.length) * 100 : 0}%` }}
                     />
                   </div>
                 </div>
@@ -1218,12 +1397,12 @@ export default function CashFlowOpsPage() {
                 <div>
                   <div className="flex justify-between text-xs mb-1">
                     <span className="text-[#E63946]">Devam Ediyor</span>
-                    <span className="text-white font-semibold">{citRoutes.filter(r => r.status === "in-progress").length}</span>
+                    <span className="text-white font-semibold">{filteredRoutes.filter(r => r.status === "in-progress").length}</span>
                   </div>
                   <div className="h-2 w-full bg-[#112544] rounded-full overflow-hidden">
                     <div 
                       className="h-2 bg-[#E63946] rounded-full"
-                      style={{ width: `${(citRoutes.filter(r => r.status === "in-progress").length / citRoutes.length) * 100}%` }}
+                      style={{ width: `${filteredRoutes.length > 0 ? (filteredRoutes.filter(r => r.status === "in-progress").length / filteredRoutes.length) * 100 : 0}%` }}
                     />
                   </div>
                 </div>
@@ -1231,15 +1410,15 @@ export default function CashFlowOpsPage() {
                   <div className="flex justify-between text-xs mb-1">
                     <span className="text-[#10B981]">Planlı</span>
                     <span className="text-white font-semibold">
-                      {citRoutes.reduce((sum, r) => sum + r.atms.filter((a: any) => a.planned).length, 0)}
+                      {filteredRoutes.reduce((sum, r) => sum + r.atms.filter((a: any) => a.planned).length, 0)}
                     </span>
                   </div>
                   <div className="h-2 w-full bg-[#112544] rounded-full overflow-hidden">
                     <div 
                       className="h-2 bg-[#10B981] rounded-full"
                       style={{ 
-                        width: `${(citRoutes.reduce((sum, r) => sum + r.atms.filter((a: any) => a.planned).length, 0) / 
-                                  citRoutes.reduce((sum, r) => sum + r.atms.length, 0)) * 100}%` 
+                        width: `${filteredRoutes.reduce((sum, r) => sum + r.atms.length, 0) > 0 ? (filteredRoutes.reduce((sum, r) => sum + r.atms.filter((a: any) => a.planned).length, 0) / 
+                                  filteredRoutes.reduce((sum, r) => sum + r.atms.length, 0)) * 100 : 0}%` 
                       }}
                     />
                   </div>
@@ -1248,15 +1427,15 @@ export default function CashFlowOpsPage() {
                   <div className="flex justify-between text-xs mb-1">
                     <span className="text-[#F2B705]">Plansız</span>
                     <span className="text-white font-semibold">
-                      {citRoutes.reduce((sum, r) => sum + r.atms.filter((a: any) => !a.planned).length, 0)}
+                      {filteredRoutes.reduce((sum, r) => sum + r.atms.filter((a: any) => !a.planned).length, 0)}
                     </span>
                   </div>
                   <div className="h-2 w-full bg-[#112544] rounded-full overflow-hidden">
                     <div 
                       className="h-2 bg-[#F2B705] rounded-full"
                       style={{ 
-                        width: `${(citRoutes.reduce((sum, r) => sum + r.atms.filter((a: any) => !a.planned).length, 0) / 
-                                  citRoutes.reduce((sum, r) => sum + r.atms.length, 0)) * 100}%` 
+                        width: `${filteredRoutes.reduce((sum, r) => sum + r.atms.length, 0) > 0 ? (filteredRoutes.reduce((sum, r) => sum + r.atms.filter((a: any) => !a.planned).length, 0) / 
+                                  filteredRoutes.reduce((sum, r) => sum + r.atms.length, 0)) * 100 : 0}%` 
                       }}
                     />
                   </div>
@@ -1270,146 +1449,23 @@ export default function CashFlowOpsPage() {
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-white/60">Toplam ATM</span>
                   <span className="text-sm font-bold text-white">
-                    {citRoutes.reduce((sum, r) => sum + r.atms_count, 0).toLocaleString()}
+                    {filteredRoutes.reduce((sum, r) => sum + r.atms_count, 0).toLocaleString()}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-white/60">Toplam Mesafe</span>
                   <span className="text-sm font-bold text-white">
-                    {citRoutes.reduce((sum, r) => sum + parseInt(r.distance), 0).toLocaleString()} km
+                    {filteredRoutes.reduce((sum, r) => sum + parseInt(r.distance), 0).toLocaleString()} km
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-white/60">Avg. Verimlilik</span>
                   <span className="text-sm font-bold text-[#10B981]">
-                    {(citRoutes.reduce((sum, r) => sum + r.efficiency_score, 0) / citRoutes.length).toFixed(1)}%
+                    {filteredRoutes.length > 0 ? (filteredRoutes.reduce((sum, r) => sum + r.efficiency_score, 0) / filteredRoutes.length).toFixed(1) : 0}%
                   </span>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
-
-        {/* NM SLA Compliance Table */}
-        <div className="bg-[#0E2142]/60 rounded-xl p-5 ring-1 ring-[#2B416B] mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="text-sm font-semibold text-white">🎯 NM Merkezi SLA Uyum Skorları (En İyi 5)</div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="date"
-                  value={slaDateStart}
-                  onChange={(e) => setSlaDateStart(e.target.value)}
-                  max={slaDateEnd}
-                  className="px-2 py-1 text-xs rounded-lg bg-[#112544] text-white border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#2E86FF]"
-                />
-                <span className="text-white/50 text-xs">-</span>
-                <input
-                  type="date"
-                  value={slaDateEnd}
-                  onChange={(e) => setSlaDateEnd(e.target.value)}
-                  min={slaDateStart}
-                  max="2026-02-04"
-                  className="px-2 py-1 text-xs rounded-lg bg-[#112544] text-white border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#2E86FF]"
-                />
-              </div>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => {
-                    setSlaDateStart("2026-02-01");
-                    setSlaDateEnd("2026-02-04");
-                  }}
-                  className="px-2 py-1 text-xs rounded bg-[#112544] text-white/70 hover:text-white border border-[#2B416B] hover:border-[#2E86FF] transition"
-                >
-                  Bu Ay
-                </button>
-                <button
-                  onClick={() => {
-                    setSlaDateStart("2026-01-01");
-                    setSlaDateEnd("2026-01-31");
-                  }}
-                  className="px-2 py-1 text-xs rounded bg-[#112544] text-white/70 hover:text-white border border-[#2B416B] hover:border-[#2E86FF] transition"
-                >
-                  Geçen Ay
-                </button>
-                <button
-                  onClick={() => {
-                    setSlaDateStart("2025-11-01");
-                    setSlaDateEnd("2026-02-04");
-                  }}
-                  className="px-2 py-1 text-xs rounded bg-[#112544] text-white/70 hover:text-white border border-[#2B416B] hover:border-[#2E86FF] transition"
-                >
-                  Son 3 Ay
-                </button>
-                <button
-                  onClick={() => {
-                    setSlaDateStart("2025-08-01");
-                    setSlaDateEnd("2026-02-04");
-                  }}
-                  className="px-2 py-1 text-xs rounded bg-[#112544] text-white/70 hover:text-white border border-[#2B416B] hover:border-[#2E86FF] transition"
-                >
-                  Son 6 Ay
-                </button>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="text-xs text-[#A7B8D8]">
-                <span className="text-[#10B981]">●</span> ≥90% 
-                <span className="ml-2 text-[#F2B705]">●</span> 70-89% 
-                <span className="ml-2 text-[#E63946]">●</span> &lt;70%
-              </div>
-              <button
-                onClick={() => setShowAllNmSlaModal(true)}
-                className="px-3 py-1 text-xs rounded-lg font-semibold bg-[#2E86FF] text-white hover:bg-[#2E86FF]/80 transition"
-              >
-                Tümünü Gör ({allCashCenterGroups.length})
-              </button>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-            {allCashCenterGroups
-              .map(([nm, atms]) => {
-                // Mock SLA compliance calculation based on NM characteristics and date range
-                const daysDiff = Math.floor((new Date(slaDateEnd).getTime() - new Date(slaDateStart).getTime()) / (1000 * 60 * 60 * 24));
-                const daysFromCurrent = Math.floor((new Date("2026-02-04").getTime() - new Date(slaDateEnd).getTime()) / (1000 * 60 * 60 * 24));
-                const baseScore = 75 + (Math.abs(nm.charCodeAt(0) * 17) % 20);
-                // Slightly lower scores for past dates, slightly varied by range length
-                const rangeFactor = daysDiff > 60 ? 2 : daysDiff > 30 ? 1 : 0.5;
-                const slaScore = Math.min(99, Math.max(65, baseScore - (daysFromCurrent * 0.05) + (rangeFactor * 0.5)));
-                return { nm, atms, slaScore };
-              })
-              .sort((a, b) => b.slaScore - a.slaScore) // En iyiden en kötüye sırala
-              .slice(0, 5) // İlk 5 (en iyi 5)
-              .map(({ nm, atms, slaScore }) => {
-                const barColor = slaScore >= 90 ? "#10B981" : slaScore >= 70 ? "#F2B705" : "#E63946";
-                
-                return (
-                  <div key={nm} className="bg-[#112544]/50 rounded-lg p-3 ring-1 ring-[#2B416B]/30">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-xs font-semibold text-white truncate max-w-[140px]" title={nm}>
-                        {nm}
-                      </span>
-                      <span className="text-sm font-bold" style={{ color: barColor }}>
-                        {slaScore}%
-                      </span>
-                    </div>
-                    <div className="h-2 w-full bg-[#0E2142] rounded-full overflow-hidden">
-                      <div 
-                        className="h-2 rounded-full transition-all duration-500"
-                        style={{ 
-                          width: `${slaScore}%`,
-                          backgroundColor: barColor
-                        }}
-                      />
-                    </div>
-                    <div className="flex justify-between items-center mt-2 text-[10px] text-white/50">
-                      <span>{atms.length} ATM</span>
-                      <span>{atms.filter((a: any) => a.location_type === "Offsite").length} Offsite</span>
-                    </div>
-                  </div>
-                );
-              })
-            }
           </div>
         </div>
 
@@ -1481,17 +1537,19 @@ export default function CashFlowOpsPage() {
                 const dateRangeLabel = `${formatDate(routeDateStart)} - ${formatDate(routeDateEnd)}`;
                 const daysDiff = Math.floor((new Date(routeDateEnd).getTime() - new Date(routeDateStart).getTime()) / (1000 * 60 * 60 * 24));
                 
-                const filteredRoutes = citRoutes.filter(r => {
+                // Seçili merkeze göre filtreleme
+                const baseRoutes = selectedCashCenter ? citRoutes.filter(r => r.cash_center === selectedCashCenter) : citRoutes;
+                const dateFilteredRoutes = baseRoutes.filter(r => {
                   const routeDate = r.day === "today" ? "2026-02-04" : 
                                    r.day === "tomorrow" ? "2026-02-05" : "2026-02-06";
                   return routeDate >= routeDateStart && routeDate <= routeDateEnd;
                 });
                 
                 // Create CSV content
-                let csvContent = `CIT Rota Detayları Raporu\nTarih Aralığı: ${dateRangeLabel}\nRapor Süresi: ${daysDiff + 1} Gün\nToplam Rota: ${filteredRoutes.length}\n\n`;
+                let csvContent = `CIT Rota Detayları Raporu${selectedCashCenter ? `\nNakit Merkezi: ${selectedCashCenter}` : ''}\nTarih Aralığı: ${dateRangeLabel}\nRapor Süresi: ${daysDiff + 1} Gün\nToplam Rota: ${dateFilteredRoutes.length}\n\n`;
                 csvContent += "Rota ID,NM Merkezi,Tarih,CIT Şirketi,Ekip,Araç,Operasyon Tipi,Durum,Toplam ATM,Tamamlanan,Verimlilik %,Tahmini Süre,Toplam Nakit\n";
                 
-                filteredRoutes.forEach((route) => {
+                dateFilteredRoutes.forEach((route) => {
                   const dateLabel = route.day === "today" ? "4 Şubat" : route.day === "tomorrow" ? "5 Şubat" : route.planned_date || "6+ Şubat";
                   const statusLabel = route.status === "in-progress" ? "Devam Ediyor" : "Planlandı";
                   
@@ -1518,7 +1576,7 @@ export default function CashFlowOpsPage() {
         </div>
 
         <div className="space-y-4">
-          {citRoutes.filter(r => {
+          {filteredRoutes.filter(r => {
             // Map day to actual dates for filtering
             const routeDate = r.day === "today" ? "2026-02-04" : 
                              r.day === "tomorrow" ? "2026-02-05" : "2026-02-06";
@@ -1811,7 +1869,14 @@ export default function CashFlowOpsPage() {
         {/* Actions */}
         <div className="col-span-12 xl:col-span-5 bg-[#112544] rounded-2xl p-4 ring-1 ring-[#2B416B]">
           <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-            <div className="text-sm text-white font-semibold">⚡ Top Actions</div>
+            <div className="flex items-center gap-2">
+              <div className="text-sm text-white font-semibold">⚡ Öncelikli İşlemler</div>
+              {selectedCashCenter && data && (
+                <div className="text-xs text-[#2E86FF] bg-[#2E86FF]/10 px-2 py-1 rounded-lg">
+                  {data.top_actions.filter((a: any) => a.cash_center === selectedCashCenter).length} ATM
+                </div>
+              )}
+            </div>
             <div className="flex gap-2 items-center flex-wrap">
               <div className="flex items-center gap-2">
                 <input
@@ -1868,7 +1933,7 @@ export default function CashFlowOpsPage() {
                   };
                   const dateRangeLabel = `${formatDate(topActionsDateStart)} - ${formatDate(topActionsDateEnd)}`;
                   
-                  let csvContent = `Top Actions Raporu\nTarih Aralığı: ${dateRangeLabel}\n\n`;
+                  let csvContent = `Öncelikli İşlemler Raporu\nTarih Aralığı: ${dateRangeLabel}\n\n`;
                   csvContent += "ATM ID,ATM Adı,Şehir,İlçe,Aksiyon,Risk Seviyesi,ETA\n";
                   
                   if (data) {
@@ -1881,7 +1946,7 @@ export default function CashFlowOpsPage() {
                   const link = document.createElement("a");
                   const url = URL.createObjectURL(blob);
                   link.setAttribute("href", url);
-                  link.setAttribute("download", `Top_Actions_${topActionsDateStart}_${topActionsDateEnd}.csv`);
+                  link.setAttribute("download", `Oncelikli_Islemler_${topActionsDateStart}_${topActionsDateEnd}.csv`);
                   link.click();
                 }}
                 className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-[#2E86FF] to-[#0066FF] hover:from-[#0066FF] hover:to-[#2E86FF] text-white text-xs font-semibold shadow-lg hover:shadow-xl transition-all flex items-center gap-1.5"
@@ -1895,7 +1960,9 @@ export default function CashFlowOpsPage() {
             {!data ? (
               <div className="text-[#A7B8D8] text-sm">Loading…</div>
             ) : (
-              data.top_actions.map((a) => (
+              data.top_actions
+                .filter((a: any) => !selectedCashCenter || a.cash_center === selectedCashCenter)
+                .map((a: any) => (
                 <div key={a.atm_id} className="bg-[#0E2142]/60 rounded-xl p-3 ring-1 ring-[#2B416B]">
                   <div className="flex items-center justify-between">
                     <div className="font-semibold">ATM {a.atm_id}</div>
@@ -1904,6 +1971,9 @@ export default function CashFlowOpsPage() {
                   <div className="text-xs text-white/80 mt-1">{a.atm_name || "N/A"}</div>
                   <div className="text-xs text-white/70 mt-1">
                     {a.city}/{a.district}
+                  </div>
+                  <div className="text-xs text-white/60 mt-1">
+                    📍 {a.cash_center}
                   </div>
                   <div className="mt-2 flex items-center justify-between">
                     <div className="text-sm">
@@ -1920,7 +1990,7 @@ export default function CashFlowOpsPage() {
                   </div>
                   <button 
                     onClick={() => {
-                      alert(`Cash Task oluşturuldu!\n\nATM: ${a.atm_id}\nLokasyon: ${a.city}/${a.district}\nAksiyon: ${a.action}\nRisk: ${a.risk}\nETA: ${a.eta}`);
+                      alert(`Cash Task oluşturuldu!\n\nATM: ${a.atm_id}\nLokasyon: ${a.city}/${a.district}\nNakit Merkezi: ${a.cash_center}\nAksiyon: ${a.action}\nRisk: ${a.risk}\nETA: ${a.eta}`);
                     }}
                     className="mt-3 w-full px-3 py-2 rounded-xl bg-gradient-to-r from-[#2E86FF] to-[#0066FF] hover:from-[#0066FF] hover:to-[#2E86FF] text-white text-xs font-semibold shadow-lg hover:shadow-xl transition-all cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
                   >
@@ -2642,19 +2712,20 @@ export default function CashFlowOpsPage() {
                   <div className="space-y-2">
                   {slaExceededAtms
                     .sort((a, b) => {
-                      // Calculate critical status for sorting
+                      // Calculate nearby ATM distance for sorting
                       const nearbyA = nearbyAtmsData.find(n => n.atm_id === a.atm_id);
                       const nearbyB = nearbyAtmsData.find(n => n.atm_id === b.atm_id);
                       
-                      const isCriticalA = !nearbyA || nearbyA.nearbyAtms.length === 0 || 
-                                         (nearbyA.nearbyAtms.length > 0 && nearbyA.nearbyAtms[0].distance > 10);
-                      const isCriticalB = !nearbyB || nearbyB.nearbyAtms.length === 0 || 
-                                         (nearbyB.nearbyAtms.length > 0 && nearbyB.nearbyAtms[0].distance > 10);
+                      const nearbyCountA = nearbyA ? nearbyA.nearbyAtms.length : 0;
+                      const nearbyCountB = nearbyB ? nearbyB.nearbyAtms.length : 0;
                       
-                      // Critical ATMs first
-                      if (isCriticalA && !isCriticalB) return -1;
-                      if (!isCriticalA && isCriticalB) return 1;
-                      return 0;
+                      // Get distance to nearest ATM (if exists)
+                      const nearestDistanceA = nearbyCountA > 0 ? nearbyA.nearbyAtms[0].distance : 999999;
+                      const nearestDistanceB = nearbyCountB > 0 ? nearbyB.nearbyAtms[0].distance : 999999;
+                      
+                      // Sort by nearest ATM distance (furthest first = most critical)
+                      // ATMs with no nearby ATMs will have distance 999999 and appear first
+                      return nearestDistanceB - nearestDistanceA;
                     })
                     .map((atm) => {
                     // Calculate nearby ATMs for this SLA exceeded ATM
@@ -2683,18 +2754,28 @@ export default function CashFlowOpsPage() {
                           <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-[#8B5CF6]/20 text-white">
                             SLA Aşıldı
                           </span>
-                          {isCritical && (
+                          {nearbyAtm && nearbyAtm.nearbyAtms.length === 0 && (
                             <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-red-500/20 text-red-400 ring-1 ring-red-500/50">
-                              🚨 ACİL
+                              🚨 Yakınında ATM YOK
+                            </span>
+                          )}
+                          {nearbyAtm && nearbyAtm.nearbyAtms.length > 0 && (
+                            <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-500/20 text-blue-400">
+                              📍 En yakın: {nearbyAtm.nearbyAtms[0].distance.toFixed(1)} km
                             </span>
                           )}
                         </div>
                         <div className="text-xs text-[#A7B8D8]">
                           ID: {atm.atm_id} • {atm.city} / {atm.district}
                         </div>
-                        {isCritical && (
+                        {nearbyAtm && nearbyAtm.nearbyAtms.length === 0 && (
                           <div className="text-xs text-red-400 mt-1 font-semibold">
-                            ⚠️ Maaş Ödemeli + Yakınında alternatif ATM yok - ACİL ÖNCELİK
+                            ⚠️ Yakınında alternatif ATM yok - ACİL ÖNCELİK
+                          </div>
+                        )}
+                        {nearbyAtm && nearbyAtm.nearbyAtms.length > 0 && nearbyAtm.nearbyAtms[0].distance > 10 && (
+                          <div className="text-xs text-orange-400 mt-1 font-semibold">
+                            ⚠️ En yakın alternatif {nearbyAtm.nearbyAtms[0].distance.toFixed(1)} km uzakta - Yüksek Öncelik
                           </div>
                         )}
                       </div>
@@ -3522,6 +3603,129 @@ export default function CashFlowOpsPage() {
         </div>
       )}
 
+      {/* NM SLA Compliance Table - Moved to bottom */}
+      <div className="bg-[#0E2142]/60 rounded-xl p-5 ring-1 ring-[#2B416B] mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="text-sm font-semibold text-white">🎯 NM Merkezi SLA Uyum Skorları (En İyi 5)</div>
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={slaDateStart}
+                onChange={(e) => setSlaDateStart(e.target.value)}
+                max={slaDateEnd}
+                className="px-2 py-1 text-xs rounded-lg bg-[#112544] text-white border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#2E86FF]"
+              />
+              <span className="text-white/50 text-xs">-</span>
+              <input
+                type="date"
+                value={slaDateEnd}
+                onChange={(e) => setSlaDateEnd(e.target.value)}
+                min={slaDateStart}
+                max="2026-02-04"
+                className="px-2 py-1 text-xs rounded-lg bg-[#112544] text-white border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#2E86FF]"
+              />
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => {
+                  setSlaDateStart("2026-02-01");
+                  setSlaDateEnd("2026-02-04");
+                }}
+                className="px-2 py-1 text-xs rounded bg-[#112544] text-white/70 hover:text-white border border-[#2B416B] hover:border-[#2E86FF] transition"
+              >
+                Bu Ay
+              </button>
+              <button
+                onClick={() => {
+                  setSlaDateStart("2026-01-01");
+                  setSlaDateEnd("2026-01-31");
+                }}
+                className="px-2 py-1 text-xs rounded bg-[#112544] text-white/70 hover:text-white border border-[#2B416B] hover:border-[#2E86FF] transition"
+              >
+                Geçen Ay
+              </button>
+              <button
+                onClick={() => {
+                  setSlaDateStart("2025-11-01");
+                  setSlaDateEnd("2026-02-04");
+                }}
+                className="px-2 py-1 text-xs rounded bg-[#112544] text-white/70 hover:text-white border border-[#2B416B] hover:border-[#2E86FF] transition"
+              >
+                Son 3 Ay
+              </button>
+              <button
+                onClick={() => {
+                  setSlaDateStart("2025-08-01");
+                  setSlaDateEnd("2026-02-04");
+                }}
+                className="px-2 py-1 text-xs rounded bg-[#112544] text-white/70 hover:text-white border border-[#2B416B] hover:border-[#2E86FF] transition"
+              >
+                Son 6 Ay
+              </button>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-xs text-[#A7B8D8]">
+              <span className="text-[#10B981]">●</span> ≥90% 
+              <span className="ml-2 text-[#F2B705]">●</span> 70-89% 
+              <span className="ml-2 text-[#E63946]">●</span> &lt;70%
+            </div>
+            <button
+              onClick={() => setShowAllNmSlaModal(true)}
+              className="px-3 py-1 text-xs rounded-lg font-semibold bg-[#2E86FF] text-white hover:bg-[#2E86FF]/80 transition"
+            >
+              Tümünü Gör ({allCashCenterGroups.length})
+            </button>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+          {allCashCenterGroups
+            .map(([nm, atms]) => {
+              // Mock SLA compliance calculation based on NM characteristics and date range
+              const daysDiff = Math.floor((new Date(slaDateEnd).getTime() - new Date(slaDateStart).getTime()) / (1000 * 60 * 60 * 24));
+              const daysFromCurrent = Math.floor((new Date("2026-02-04").getTime() - new Date(slaDateEnd).getTime()) / (1000 * 60 * 60 * 24));
+              const baseScore = 75 + (Math.abs(nm.charCodeAt(0) * 17) % 20);
+              // Slightly lower scores for past dates, slightly varied by range length
+              const rangeFactor = daysDiff > 60 ? 2 : daysDiff > 30 ? 1 : 0.5;
+              const slaScore = Math.min(99, Math.max(65, baseScore - (daysFromCurrent * 0.05) + (rangeFactor * 0.5)));
+              return { nm, atms, slaScore };
+            })
+            .sort((a, b) => b.slaScore - a.slaScore) // En iyiden en kötüye sırala
+            .slice(0, 5) // İlk 5 (en iyi 5)
+            .map(({ nm, atms, slaScore }) => {
+              const barColor = slaScore >= 90 ? "#10B981" : slaScore >= 70 ? "#F2B705" : "#E63946";
+              
+              return (
+                <div key={nm} className="bg-[#112544]/50 rounded-lg p-3 ring-1 ring-[#2B416B]/30">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-xs font-semibold text-white truncate max-w-[140px]" title={nm}>
+                      {nm}
+                    </span>
+                    <span className="text-sm font-bold" style={{ color: barColor }}>
+                      {slaScore}%
+                    </span>
+                  </div>
+                  <div className="h-2 w-full bg-[#0E2142] rounded-full overflow-hidden">
+                    <div 
+                      className="h-2 rounded-full transition-all duration-500"
+                      style={{ 
+                        width: `${slaScore}%`,
+                        backgroundColor: barColor
+                      }}
+                    />
+                  </div>
+                  <div className="flex justify-between items-center mt-2 text-[10px] text-white/50">
+                    <span>{atms.length} ATM</span>
+                    <span>{atms.filter((a: any) => a.location_type === "Offsite").length} Offsite</span>
+                  </div>
+                </div>
+              );
+            })
+          }
+        </div>
+      </div>
+
       {/* SLA Contract Information Panel */}
       <div className="bg-gradient-to-r from-[#2E86FF]/10 to-[#8B5CF6]/10 rounded-xl p-4 ring-1 ring-[#2E86FF]/30 mb-4">
         <div className="flex items-start gap-3">
@@ -3613,6 +3817,168 @@ export default function CashFlowOpsPage() {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Remaining Routes Modal - Kalan İşler */}
+      {showRemainingRoutesModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4" style={{ zIndex: 10000 }}>
+          <div className="bg-[#112544] rounded-2xl w-full max-w-6xl max-h-[90vh] flex flex-col ring-2 ring-[#2B416B]">
+            <div className="flex items-center justify-between p-4 border-b border-[#2B416B] bg-[#0E2142]/60 flex-shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="text-lg font-semibold">⏳ Kalan İşler</div>
+                <span className="px-3 py-1 rounded-full text-sm font-semibold bg-[#F2B705]/20 text-[#F2B705]">
+                  {remainingRoutesData.length} Rota
+                </span>
+                {selectedCashCenter && (
+                  <span className="px-3 py-1 rounded-full text-sm font-semibold bg-[#2E86FF]/20 text-white">
+                    🏦 {selectedCashCenter}
+                  </span>
+                )}
+              </div>
+              <button onClick={() => setShowRemainingRoutesModal(false)} className="text-[#A7B8D8] hover:text-white text-2xl">&times;</button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto flex-1">
+              {remainingRoutesData.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <div className="text-6xl mb-4">🎉</div>
+                  <div className="text-xl font-bold text-white mb-2">Tüm İşler Tamamlandı!</div>
+                  <div className="text-sm text-[#A7B8D8]">Bu nakit merkezi için kalan iş bulunmamaktadır.</div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {remainingRoutesData.map((route: any, index: number) => {
+                    const dayLabel = route.day === "today" ? "Bugün" : route.day === "tomorrow" ? "Yarın" : "2 Gün Sonra";
+                    const operationColor = route.operation_type === "replenishment" ? "#10B981" : route.operation_type === "collection" ? "#F2B705" : "#2E86FF";
+                    const operationIcon = route.operation_type === "replenishment" ? "📦" : route.operation_type === "collection" ? "🚛" : "🔄";
+                    const operationLabel = route.operation_type === "replenishment" ? "İkmal" : route.operation_type === "collection" ? "Toplama" : "Karma";
+                    
+                    return (
+                      <div key={route.id} className="bg-[#0E2142]/60 rounded-xl p-5 ring-1 ring-[#2B416B] hover:ring-[#2E86FF] transition">
+                        <div className="flex items-start justify-between mb-4">
+                          <div className="flex items-start gap-3">
+                            <div className="text-2xl">{operationIcon}</div>
+                            <div>
+                              <div className="text-sm font-bold text-white mb-1">{route.name}</div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="px-2 py-0.5 rounded text-xs font-semibold" style={{ backgroundColor: `${operationColor}20`, color: operationColor }}>
+                                  {operationLabel}
+                                </span>
+                                <span className="px-2 py-0.5 rounded text-xs font-semibold bg-[#2E86FF]/20 text-[#2E86FF]">
+                                  {dayLabel}
+                                </span>
+                                <span className="px-2 py-0.5 rounded text-xs font-semibold bg-[#F2B705]/20 text-[#F2B705]">
+                                  {route.status === "planned" ? "Planlandı" : "Devam Ediyor"}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-xs text-[#A7B8D8]">İlerleme</div>
+                            <div className="text-xl font-bold" style={{ color: operationColor }}>{route.progress}%</div>
+                          </div>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                          <div className="bg-[#112544] rounded-lg p-3">
+                            <div className="text-xs text-[#A7B8D8]">ATM Sayısı</div>
+                            <div className="text-sm font-bold mt-1">{route.atms_count}</div>
+                          </div>
+                          <div className="bg-[#112544] rounded-lg p-3">
+                            <div className="text-xs text-[#A7B8D8]">Tamamlanan</div>
+                            <div className="text-sm font-bold mt-1 text-[#10B981]">{route.completed}/{route.atms_count}</div>
+                          </div>
+                          <div className="bg-[#112544] rounded-lg p-3">
+                            <div className="text-xs text-[#A7B8D8]">Tahmini Süre</div>
+                            <div className="text-sm font-bold mt-1">{route.estimated_time}</div>
+                          </div>
+                          <div className="bg-[#112544] rounded-lg p-3">
+                            <div className="text-xs text-[#A7B8D8]">Verimlilik</div>
+                            <div className="text-sm font-bold mt-1 text-[#10B981]">{route.efficiency_score}%</div>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center gap-3 mb-3">
+                          <div className="flex-1">
+                            <div className="h-2 w-full bg-[#112544] rounded-full overflow-hidden">
+                              <div 
+                                className="h-2 rounded-full transition-all duration-500"
+                                style={{ 
+                                  width: `${route.progress}%`,
+                                  backgroundColor: operationColor
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[#A7B8D8]">🚐 Araç:</span>
+                            <span className="text-white font-semibold">{route.vehicle}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[#A7B8D8]">👥 Ekip:</span>
+                            <span className="text-white font-semibold">{route.team}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[#A7B8D8]">🏢 Firma:</span>
+                            <span className="text-white font-semibold">{route.cit_company}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Tam Ekran Heat Map Modal */}
+      {fullscreenHeatMap && (
+        <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-[#2B416B] bg-[#0A1628]">
+            <div className="flex items-center gap-3">
+              <h2 className="text-xl font-bold text-white">🗺️ Low Cash ATM Heat Map - Tam Ekran</h2>
+              <div className="text-sm text-[#A7B8D8]">
+                {lowCashAtms.length} ATM
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-4">
+              {/* Legend */}
+              <div className="flex items-center gap-4 text-sm">
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#E63946]/20">
+                  <span className="inline-block h-3 w-3 rounded-full" style={{ background: "#E63946" }} />
+                  <span className="text-white">Kritik (&lt;20%)</span>
+                </div>
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#F59E0B]/20">
+                  <span className="inline-block h-3 w-3 rounded-full" style={{ background: "#F59E0B" }} />
+                  <span className="text-white">Düşük (20-30%)</span>
+                </div>
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#10B981]/20">
+                  <span className="inline-block h-3 w-3 rounded-full" style={{ background: "#10B981" }} />
+                  <span className="text-white">Normal (&gt;30%)</span>
+                </div>
+              </div>
+              
+              <button
+                onClick={() => setFullscreenHeatMap(false)}
+                className="px-4 py-2 bg-[#E63946] hover:bg-[#D62839] text-white font-semibold rounded-lg transition flex items-center gap-2"
+              >
+                ✕ Kapat
+              </button>
+            </div>
+          </div>
+          
+          {/* Map - Full Height with proper key to force re-render */}
+          <div className="flex-1 w-full" style={{ height: 'calc(100vh - 73px)' }}>
+            <HeatMapComponent key="fullscreen-heatmap" lowCashAtms={lowCashAtms} />
           </div>
         </div>
       )}

@@ -1,7 +1,7 @@
 export const tr = {
   // Navigation
   nav: {
-    overview: "Genel Bakış",
+    overview: "�️ ATM Health Guardian",
     cashflow: "Nakit Akışı",
     trendHealth: "Trend & Sağlık",
     commandCenter: "Komuta Merkezi",
@@ -9,7 +9,7 @@ export const tr = {
 
   // Overview Page
   overview: {
-    title: "Genel Bakış",
+    title: "ATM Health Guardian - Proactive Maintenance & Performance",
     aiMotorDecisions: "AI Motor Kararları",
     aiRecommendations: "AI Motor Önerileri",
     slmRecommendations: "SLM açılması öneriliyor",
@@ -61,9 +61,7 @@ export const tr = {
     route: "Rota",
     atmCount: "ATM",
     estimatedTime: "Tahmini Süre",
-    totalCash: "Toplam Nakit",
     efficiency: "Verimlilik",
-    status: "Durum",
     inProgress: "Devam Ediyor",
     completed: "Tamamlandı",
     planned: "Planlandı",
@@ -80,7 +78,6 @@ export const tr = {
     outflow: "Çıkış (₺)",
     net: "Net (₺)",
     transactions: "İşlem",
-    status: "Durum",
     week: "Hafta",
     avgDaily: "Ort. Günlük",
     lowCashAtmsList: "Düşük Nakit ATM Listesi",

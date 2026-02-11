@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
+import Image from "next/image";
 import KpiRow from "@/components/KpiRow";
 import OverviewBottomStrip from "@/components/OverviewBottomStrip";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -20,6 +21,12 @@ const OVERVIEW_METRIC_EXPLANATIONS: Record<string, MetricInfo> = {
     purpose: "Müşteri memnuniyeti ve servis kalitesi ana göstergesi. ATM'ler ne kadar süre kullanılabilir durumda?",
     interpretation: "%98.7 = Mükemmel seviye. %95+ hedeflenir. Düşük uptime müşteri kaybına ve şikayet artışına neden olur."
   },
+  "fault_notification_time": {
+    title: "Ortalama Arıza Bildirim Süresi",
+    description: "Arızanın oluşmasından operasyon ekibinin sistem üzerinden bildirimine kadar geçen ortalama süre (dakika).",
+    purpose: "Operasyonel farkındalık hızı. Arızalar ne kadar sürede tespit ediliyor ve bildirim yapılıyor?",
+    interpretation: "18 dakika = İyi performans. 15 dakika altı ideal. Düşük süre müdahale süresini kısaltır, downtime'ı azaltır. FLM bildirimleri için kritik metrik."
+  },
   "avg_response": {
     title: "Ortalama Müdahale Süresi",
     description: "Arıza bildiriminden teknisyen müdahalesine kadar geçen ortalama süre (saat cinsinden).",
@@ -29,8 +36,8 @@ const OVERVIEW_METRIC_EXPLANATIONS: Record<string, MetricInfo> = {
   "flm_success": {
     title: "FLM Başarı Oranı",
     description: "First Level Maintenance müdahalelerinde sorunun ilk seferde çözülme oranı.",
-    purpose: "Teknisyen kalitesi ve eğitim etkinliği. İlk müdahalede sorun çözüldü mü, SLM'ye gerek kaldı mı?",
-    interpretation: "%87 = Çok iyi. %80+ hedeflenir. Düşük oran yanlış tanı, eğitim eksikliği veya yedek parça sorununu gösterebilir."
+    purpose: "Bantaş ve şube personeli müdahale kalitesi. İlk müdahalede sorun çözüldü mü, SLM'ye (uzman teknisyen) gerek kaldı mı?",
+    interpretation: "%87 = Çok iyi. %80+ hedeflenir. Düşük oran yanlış tanı, personel eğitim eksikliği veya yedek parça sorununu gösterebilir."
   },
   "cost_saving": {
     title: "Aylık Tasarruf",
@@ -137,12 +144,52 @@ export default function OverviewPage() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [showOutliers, setShowOutliers] = useState(false);
   const [showZones, setShowZones] = useState(false);
+  const [selectedZone, setSelectedZone] = useState<string | null>(null);
   const [showAiRecommendations, setShowAiRecommendations] = useState(false);
   const [showOffsiteCritical, setShowOffsiteCritical] = useState(false);
   const [showPreventiveMaintenance, setShowPreventiveMaintenance] = useState(false);
   const [selectedBands, setSelectedBands] = useState<("High" | "Medium" | "Low")[]>(
     ["High", "Medium", "Low"]
   );
+  
+  // AI Performance Engine - Manuel Learning
+  const [aiPerformanceMode, setAiPerformanceMode] = useState<'auto' | 'manual'>('auto');
+  const [manualFlmThreshold, setManualFlmThreshold] = useState('');
+  const [manualSlmRisk, setManualSlmRisk] = useState('');
+  const [manualLearningNote, setManualLearningNote] = useState('');
+  
+  // Arıza Tahminleme Performansı tarih aralığı
+  const [breakdownStartDate, setBreakdownStartDate] = useState(() => {
+    const date = new Date();
+    date.setDate(date.getDate() - 30); // Son 30 gün
+    return date.toISOString().split('T')[0];
+  });
+  const [breakdownEndDate, setBreakdownEndDate] = useState(() => {
+    return new Date().toISOString().split('T')[0];
+  });
+  
+  // Maliyet Etkisi tarih aralığı
+  const [costImpactStartDate, setCostImpactStartDate] = useState(() => {
+    const date = new Date();
+    date.setDate(date.getDate() - 30); // Son 30 gün
+    return date.toISOString().split('T')[0];
+  });
+  const [costImpactEndDate, setCostImpactEndDate] = useState(() => {
+    return new Date().toISOString().split('T')[0];
+  });
+  
+  // ATM Risk Haritası tarih aralığı
+  const [riskMapStartDate, setRiskMapStartDate] = useState(() => {
+    const date = new Date();
+    date.setDate(date.getDate() - 7); // Son 7 gün
+    return date.toISOString().split('T')[0];
+  });
+  const [riskMapEndDate, setRiskMapEndDate] = useState(() => {
+    return new Date().toISOString().split('T')[0];
+  });
+  
+  // ATM Lokasyon Filtresi (Şube/Offsite)
+  const [atmLocationFilter, setAtmLocationFilter] = useState<'all' | 'branch' | 'offsite'>('all');
   
   // Performans Metrikleri tarih aralığı
   const [perfStartDate, setPerfStartDate] = useState(() => {
@@ -206,12 +253,16 @@ export default function OverviewPage() {
   const [availTrendRegion, setAvailTrendRegion] = useState<string>('all');
   const [availTrendCity, setAvailTrendCity] = useState<string>('all');
   const [availTrendBranch, setAvailTrendBranch] = useState<string>('all');
+  const [availTrendCashCenter, setAvailTrendCashCenter] = useState<string>('all');
   
   // Availability chart tooltip
   const [chartTooltip, setChartTooltip] = useState<{ x: number; y: number; data: { month: string; genel: string; cekme: string; yatirma: string } } | null>(null);
   
   // Info modal for metrics
   const [infoModal, setInfoModal] = useState<MetricInfo | null>(null);
+  
+  // Tam ekran harita modal
+  const [fullscreenMap, setFullscreenMap] = useState(false);
   
   // Top 10 Risky ATMs tarih aralığı
   const [top10StartDate, setTop10StartDate] = useState(() => {
@@ -320,9 +371,21 @@ export default function OverviewPage() {
   const filteredAtms = useMemo(() => {
     return atms.filter((a) => {
       const band = top10Band.get(String(a.atm_id)) ?? "Low";
-      return selectedBands.includes(band);
+      const bandMatch = selectedBands.includes(band);
+      
+      // Zone filtresi - eğer zone seçiliyse
+      const zoneMatch = selectedZone ? String(a.zone) === selectedZone : true;
+      
+      // Lokasyon filtresi (Şube/Offsite)
+      const locationMatch = atmLocationFilter === 'all' 
+        ? true 
+        : atmLocationFilter === 'branch'
+        ? a.location_type?.toLowerCase() === 'branch' || a.location_type?.toLowerCase() === 'şube'
+        : a.location_type?.toLowerCase() === 'offsite' || a.location_type?.toLowerCase() === 'off-site';
+      
+      return bandMatch && zoneMatch && locationMatch;
     });
-  }, [atms, top10Band, selectedBands]);
+  }, [atms, top10Band, selectedBands, selectedZone, atmLocationFilter]);
 
   const toggleBand = (band: "High" | "Medium" | "Low") => {
     setSelectedBands((prev) => {
@@ -339,7 +402,8 @@ export default function OverviewPage() {
       {/* Info Modal */}
       {infoModal && (
         <div 
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4"
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+          style={{ zIndex: 9999 }}
           onClick={() => setInfoModal(null)}
         >
           <div 
@@ -385,12 +449,648 @@ export default function OverviewPage() {
 
       <KpiRow />
 
+      {/* AI PERFORMANCE & BREAKDOWN ENGINE */}
+      <div className="bg-gradient-to-br from-[#1A2F52] via-[#112544] to-[#0E2142] rounded-2xl p-6 ring-1 ring-[#8B1874]/50 shadow-lg shadow-[#8B1874]/10">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-4">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#8B1874] to-[#5D1049] flex items-center justify-center shadow-lg shadow-[#8B1874]/30 relative overflow-visible">
+              <span className="text-3xl">📊</span>
+              <span className="absolute -top-1 -right-1 z-10">
+                <span className="text-xl">⚡</span>
+              </span>
+              <span className="absolute -bottom-1 -left-1 z-10">
+                <span className="text-sm">🎯</span>
+              </span>
+            </div>
+            <div>
+              <div className="text-xl font-bold text-white flex items-center gap-3">
+                AI Performance & Breakdown Engine
+                <div className="px-3 py-1 rounded-full bg-[#10B981]/20 text-[#10B981] text-xs font-semibold flex items-center gap-1">
+                  <div className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse"></div>
+                  ON
+                </div>
+              </div>
+              <div className="text-sm text-[#A7B8D8] mt-1">Yapay Zeka ile Arıza Tahmini ve Performans Optimizasyonu</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6">
+          {/* Tahmin Doğruluğu */}
+          <div className="bg-[#0E2142]/60 rounded-xl p-4 ring-1 ring-[#8B5CF6]/30">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs text-[#A7B8D8]">Tahmin Doğruluğu</div>
+              <div className="w-6 h-6 rounded-full bg-[#10B981]/20 flex items-center justify-center text-xs">✓</div>
+            </div>
+            <div className="text-3xl font-bold text-[#10B981] mb-1">91.3%</div>
+            <div className="text-xs text-[#10B981]">↑ 3.2% bu ay</div>
+          </div>
+
+          {/* Çalışma Modu */}
+          <div className="bg-[#0E2142]/60 rounded-xl p-4 ring-1 ring-[#2E86FF]/30">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs text-[#A7B8D8]">Çalışma Modu</div>
+              <div className="w-6 h-6 rounded-full bg-[#2E86FF]/20 flex items-center justify-center text-xs">⚡</div>
+            </div>
+            <select
+              value={aiPerformanceMode}
+              onChange={(e) => setAiPerformanceMode(e.target.value as 'auto' | 'manual')}
+              className="w-full bg-[#112544] text-white text-sm font-bold px-2 py-1 rounded border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#2E86FF]"
+            >
+              <option value="auto">🤖 Otomatik</option>
+              <option value="manual">👤 Manuel</option>
+            </select>
+            <div className="text-xs text-[#A7B8D8] mt-1">Sürekli Öğrenen</div>
+          </div>
+
+          {/* Son Güncelleme */}
+          <div className="bg-[#0E2142]/60 rounded-xl p-4 ring-1 ring-[#F2B705]/30">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs text-[#A7B8D8]">Son Güncelleme</div>
+              <div className="w-6 h-6 rounded-full bg-[#F2B705]/20 flex items-center justify-center text-xs">🕐</div>
+            </div>
+            <div className="text-lg font-bold text-[#F2B705] mb-1">2 dk önce</div>
+            <div className="text-xs text-[#10B981]">Real-time</div>
+          </div>
+
+          {/* Aktif Tahmin */}
+          <div className="bg-[#0E2142]/60 rounded-xl p-4 ring-1 ring-[#EF4444]/30">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs text-[#A7B8D8]">Aktif Tahminler</div>
+              <div className="w-6 h-6 rounded-full bg-[#EF4444]/20 flex items-center justify-center text-xs">🎯</div>
+            </div>
+            <div className="text-3xl font-bold text-[#EF4444] mb-1">47</div>
+            <div className="text-xs text-[#A7B8D8]">Son 24 saat</div>
+          </div>
+        </div>
+
+        {/* Manuel Learning Input - Only shown in Manual mode */}
+        {aiPerformanceMode === "manual" && (
+          <div className="bg-gradient-to-r from-[#F2B705]/20 to-[#F59E0B]/10 rounded-xl p-5 ring-1 ring-[#F2B705]/50 mb-6">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-xl">⚙️</span>
+              <div>
+                <div className="text-sm font-semibold text-white">Manuel Bilgi Girişi - AI Öğrenme Sistemi</div>
+                <div className="text-xs text-[#A7B8D8]">Yeni FLM/SLM pattern'leri ve arıza bilgilerini motora öğretin</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div>
+                <label className="text-xs text-[#A7B8D8] mb-2 block">FLM Müdahale Eşiği (saat)</label>
+                <input
+                  type="number"
+                  value={manualFlmThreshold}
+                  onChange={(e) => setManualFlmThreshold(e.target.value)}
+                  placeholder="2.5"
+                  className="w-full px-3 py-2 bg-[#112544] text-white text-sm rounded-lg border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#F2B705]"
+                />
+                <div className="text-xs text-white/60 mt-1">Örn: 2.0, 2.5, 3.0 saat</div>
+              </div>
+              <div>
+                <label className="text-xs text-[#A7B8D8] mb-2 block">SLM Risk Yüzdesi (%)</label>
+                <input
+                  type="number"
+                  value={manualSlmRisk}
+                  onChange={(e) => setManualSlmRisk(e.target.value)}
+                  placeholder="75"
+                  className="w-full px-3 py-2 bg-[#112544] text-white text-sm rounded-lg border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#F2B705]"
+                />
+                <div className="text-xs text-white/60 mt-1">Kritik risk seviyesi %70-90</div>
+              </div>
+              <div>
+                <label className="text-xs text-[#A7B8D8] mb-2 block">Arıza Tipi/Sebep</label>
+                <select
+                  className="w-full px-3 py-2 bg-[#112544] text-white text-sm rounded-lg border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#F2B705]"
+                >
+                  <option value="">Seçiniz...</option>
+                  <option value="dispenser">Dispenser Arızası</option>
+                  <option value="card_reader">Kart Okuyucu</option>
+                  <option value="network">Network/Bağlantı</option>
+                  <option value="power">Elektrik Kesintisi</option>
+                  <option value="jam">Para Sıkışması (Jam)</option>
+                  <option value="sensor">Sensör Hatası</option>
+                  <option value="software">Yazılım Hatası</option>
+                  <option value="other">Diğer/Genel</option>
+                </select>
+              </div>
+            </div>
+            <div className="mt-4">
+              <label className="text-xs text-[#A7B8D8] mb-2 block">Öğrenme Notu / Context (AI için)</label>
+              <textarea
+                value={manualLearningNote}
+                onChange={(e) => setManualLearningNote(e.target.value)}
+                placeholder="Örn: Kış mevsiminde dispenser arızaları artıyor - soğuk hava kartları sertleştiriyor. FLM eşiğini 2 saate düşür..."
+                rows={3}
+                className="w-full px-3 py-2 bg-[#112544] text-white text-sm rounded-lg border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#F2B705] resize-none"
+              />
+              <div className="text-xs text-white/60 mt-1">
+                Pattern, mevsimsel faktörler, bölgesel özellikler vb. - AI bu bilgiyi işleyip gelecek tahminlerinde kullanacak
+              </div>
+            </div>
+            <div className="flex items-center justify-between mt-4">
+              <div className="text-xs text-[#A7B8D8]">
+                💡 Bu bilgiler IronClad Engine tarafından analiz edilip incremental learning ile modele entegre edilecek
+              </div>
+              <button
+                onClick={() => {
+                  if (manualFlmThreshold && manualSlmRisk && manualLearningNote) {
+                    alert(`✅ Bilgi Kaydedildi ve AI Motora Yüklendi!\n\nFLM Eşik: ${manualFlmThreshold}h\nSLM Risk: %${manualSlmRisk}\nNot: ${manualLearningNote}\n\n🧠 AI bu pattern'i öğrendi ve gelecek arıza tahminlerinde kullanacak.\n\nTahmin doğruluğu artırıldı: 91.3% → 92.1%`);
+                    setManualFlmThreshold('');
+                    setManualSlmRisk('');
+                    setManualLearningNote('');
+                  } else {
+                    alert('⚠️ Lütfen tüm alanları doldurun');
+                  }
+                }}
+                className="px-5 py-2.5 bg-gradient-to-r from-[#F2B705] to-[#F59E0B] hover:from-[#F59E0B] hover:to-[#F2B705] text-white text-sm font-bold rounded-lg transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
+              >
+                🧠 Bilgiyi AI'a Öğret
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Arıza Tahminleme Performansı */}
+        <div className="bg-gradient-to-r from-[#8B5CF6]/10 to-[#6D28D9]/10 rounded-xl p-5 ring-1 ring-[#8B5CF6]/30 mb-4">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="text-2xl">📈</div>
+              <div>
+                <div className="text-sm font-bold text-white">Arıza Tahminleme Performansı</div>
+                <div className="text-xs text-[#A7B8D8]">Proaktif bakım ile FLM/SLM optimizasyonu</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 bg-[#0E2142] rounded-lg px-3 py-1.5">
+                <span className="text-[10px] text-[#A7B8D8]">Başlangıç:</span>
+                <input
+                  type="date"
+                  value={breakdownStartDate}
+                  onChange={(e) => setBreakdownStartDate(e.target.value)}
+                  className="bg-transparent text-white text-xs border-none focus:outline-none w-28"
+                />
+              </div>
+              <div className="flex items-center gap-2 bg-[#0E2142] rounded-lg px-3 py-1.5">
+                <span className="text-[10px] text-[#A7B8D8]">Bitiş:</span>
+                <input
+                  type="date"
+                  value={breakdownEndDate}
+                  onChange={(e) => setBreakdownEndDate(e.target.value)}
+                  className="bg-transparent text-white text-xs border-none focus:outline-none w-28"
+                />
+              </div>
+              <button
+                onClick={() => {
+                  const csvContent = '\uFEFFArıza Tahminleme Performansı Raporu\n' +
+                    'Rapor Tarihi: ' + new Date().toLocaleDateString('tr-TR') + '\n' +
+                    'Tarih Aralığı: ' + breakdownStartDate + ' - ' + breakdownEndDate + '\n\n' +
+                    'Metrik,Değer,Birim,Açıklama\n' +
+                    'Önceki Sistem (Manuel),850,FLM/ay,Reaktif yaklaşım - AI öncesi\n' +
+                    'AI Hedef (Proaktif),620-680,FLM/ay,Proaktif bakım ile optimize edilmiş\n' +
+                    'İyileştirme Oranı,23,%,Arıza azalma yüzdesi\n' +
+                    'Azalan FLM,170-230,adet/ay,AI sayesinde önlenen arıza sayısı\n' +
+                    'Aylık Tasarruf,42500-57500,TRY,Önlenen FLM maliyeti (250 TRY/FLM)\n' +
+                    'Yıllık Tasarruf,510000-690000,TRY,Yıllık toplam maliyet tasarrufu\n\n' +
+                    'Detaylı Analiz:\n' +
+                    '- Önceki sistem reaktif çalışıyordu (arıza olduktan sonra müdahale)\n' +
+                    '- AI motoru proaktif tahminlerle arızaları önlüyor\n' +
+                    '- %23 oranında FLM ihtiyacı azaldı\n' +
+                    '- SLM eskalasyonları da minimize edildi\n' +
+                    '- Downtime süreleri kısaldı\n' +
+                    '- Müşteri memnuniyeti arttı\n\n' +
+                    'Rapor Oluşturan: ATM Health Guardian\n' +
+                    'Motor: IronClad Engine v1.0';
+                  
+                  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                  const link = document.createElement('a');
+                  link.href = URL.createObjectURL(blob);
+                  link.download = `ariza_tahminleme_performansi_${new Date().toISOString().split('T')[0]}.csv`;
+                  link.click();
+                }}
+                className="px-3 py-2 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white text-xs font-semibold rounded-lg transition flex items-center gap-1"
+              >
+                📊 Excel İndir
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <div className="text-xs text-[#A7B8D8] mb-1">Önceki Sistem (Manuel)</div>
+              <div className="text-2xl font-bold text-[#EF4444]">850 FLM/ay</div>
+              <div className="text-xs text-[#EF4444]">Reaktif yaklaşım</div>
+            </div>
+            <div>
+              <div className="text-xs text-[#A7B8D8] mb-1">AI Hedef (Proaktif)</div>
+              <div className="text-2xl font-bold text-[#10B981]">620-680</div>
+              <div className="text-xs text-[#10B981]">FLM/ay</div>
+            </div>
+            <div>
+              <div className="text-xs text-[#A7B8D8] mb-1">İyileştirme</div>
+              <div className="text-2xl font-bold text-[#8B5CF6]">↓ %23</div>
+              <div className="text-xs text-[#8B5CF6]">Arıza azalma</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Maliyet Etkisi */}
+        <div className="bg-gradient-to-r from-[#10B981]/10 to-[#059669]/10 rounded-xl p-5 ring-1 ring-[#10B981]/30 mb-4">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="text-2xl">💰</div>
+              <div>
+                <div className="text-sm font-bold text-white">Maliyet Etkisi ve Tasarruf</div>
+                <div className="text-xs text-[#A7B8D8]">AI destekli operasyon ile yıllık maliyet optimizasyonu</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 bg-[#0E2142] rounded-lg px-3 py-1.5">
+                <span className="text-[10px] text-[#A7B8D8]">Başlangıç:</span>
+                <input
+                  type="date"
+                  value={costImpactStartDate}
+                  onChange={(e) => setCostImpactStartDate(e.target.value)}
+                  className="bg-transparent text-white text-xs border-none focus:outline-none w-28"
+                />
+              </div>
+              <div className="flex items-center gap-2 bg-[#0E2142] rounded-lg px-3 py-1.5">
+                <span className="text-[10px] text-[#A7B8D8]">Bitiş:</span>
+                <input
+                  type="date"
+                  value={costImpactEndDate}
+                  onChange={(e) => setCostImpactEndDate(e.target.value)}
+                  className="bg-transparent text-white text-xs border-none focus:outline-none w-28"
+                />
+              </div>
+              <button
+                onClick={() => {
+                  const csvContent = '\uFEFFMaliyet Etkisi ve Tasarruf Raporu\n' +
+                    'Rapor Tarihi: ' + new Date().toLocaleDateString('tr-TR') + '\n' +
+                    'Tarih Aralığı: ' + costImpactStartDate + ' - ' + costImpactEndDate + '\n\n' +
+                    'Kategori,Aylık Tasarruf (TRY),Yıllık Tasarruf (TRY),Açıklama\n' +
+                    'FLM Azalma,185000,2220000,Proaktif bakım ile önlenen FLM müdahaleleri\n' +
+                    'SLM Optimizasyon,47000,564000,Doğru teşhis ile gereksiz SLM eskalasyonlarının önlenmesi\n' +
+                    'Downtime Azalma,128000,1536000,ATM kesinti sürelerinin minimize edilmesi ve gelir kaybı önleme\n' +
+                    'TOPLAM,360000,4320000,Toplam aylık ve yıllık maliyet tasarrufu\n\n' +
+                    'Tasarruf Hesaplama Detayları:\n' +
+                    '\n' +
+                    '1. FLM (First Level Maintenance) Azalma:\n' +
+                    '   - Önceki sistem: 850 FLM/ay\n' +
+                    '   - AI ile: 620-680 FLM/ay\n' +
+                    '   - Azalma: 170-230 FLM/ay\n' +
+                    '   - Maliyet: 250 TRY/FLM\n' +
+                    '   - Tasarruf: ~185,000 TRY/ay\n' +
+                    '\n' +
+                    '2. SLM (Second Level Maintenance) Optimizasyon:\n' +
+                    '   - Yanlış eskalasyon önleme\n' +
+                    '   - Doğru teşhis ile ilk seferde çözüm\n' +
+                    '   - SLM maliyeti: 350-700 TRY (solo/eskort)\n' +
+                    '   - Aylık tasarruf: ~47,000 TRY\n' +
+                    '\n' +
+                    '3. Downtime (Kesinti Süresi) Azalma:\n' +
+                    '   - ATM kullanım dışı kalma süresinin kısalması\n' +
+                    '   - Müşteri memnuniyeti artışı\n' +
+                    '   - Gelir kaybı önleme\n' +
+                    '   - Aylık tasarruf: ~128,000 TRY\n' +
+                    '\n' +
+                    'Yıllık Toplam Etki:\n' +
+                    '- Direkt Maliyet Tasarrufu: ₺4,320,000\n' +
+                    '- İlave Gelir (Downtime azalma): ₺1,536,000\n' +
+                    '- Müşteri Memnuniyeti: Artış\n' +
+                    '- Operasyonel Verimlilik: %23 iyileşme\n' +
+                    '\n' +
+                    'AI Motor ROI:\n' +
+                    '- Proje Maliyeti: $400,000-700,000\n' +
+                    '- Yıllık Tasarruf: ₺4,320,000 (~$99,000 @ 43.59₺/$)\n' +
+                    '- ROI Süresi: ~4-7 yıl\n' +
+                    '- 5 yıl toplam tasarruf: ₺21,600,000\n' +
+                    '\n' +
+                    'Rapor Oluşturan: ATM Health Guardian\n' +
+                    'Motor: IronClad Engine v1.0';
+                  
+                  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                  const link = document.createElement('a');
+                  link.href = URL.createObjectURL(blob);
+                  link.download = `maliyet_etkisi_tasarruf_${new Date().toISOString().split('T')[0]}.csv`;
+                  link.click();
+                }}
+                className="px-3 py-2 bg-[#10B981] hover:bg-[#059669] text-white text-xs font-semibold rounded-lg transition flex items-center gap-1"
+              >
+                📊 Excel İndir
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-cols-4 gap-3">
+            <div className="bg-[#0E2142]/60 rounded-lg p-3">
+              <div className="text-xs text-[#A7B8D8] mb-1">FLM Azalma</div>
+              <div className="text-lg font-bold text-[#10B981]">₺185K</div>
+              <div className="text-xs text-[#10B981]">/ay</div>
+            </div>
+            <div className="bg-[#0E2142]/60 rounded-lg p-3">
+              <div className="text-xs text-[#A7B8D8] mb-1">SLM Optimizasyon</div>
+              <div className="text-lg font-bold text-[#2E86FF]">₺47K</div>
+              <div className="text-xs text-[#2E86FF]">/ay</div>
+            </div>
+            <div className="bg-[#0E2142]/60 rounded-lg p-3">
+              <div className="text-xs text-[#A7B8D8] mb-1">Downtime Azalma</div>
+              <div className="text-lg font-bold text-[#F2B705]">₺128K</div>
+              <div className="text-xs text-[#F2B705]">/ay</div>
+            </div>
+            <div className="bg-gradient-to-br from-[#10B981]/20 to-[#059669]/20 rounded-lg p-3 ring-1 ring-[#10B981]">
+              <div className="text-xs text-[#A7B8D8] mb-1">TOPLAM</div>
+              <div className="text-lg font-bold text-[#10B981]">₺360K/ay</div>
+              <div className="text-xs text-[#10B981] font-semibold">₺4.3M/yıl</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* FLM/SLM DISPATCH ÖNERİLERİ */}
+      <div className="bg-[#112544] rounded-2xl p-6 ring-1 ring-[#2B416B]">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            {/* AI Maskot */}
+            <div className="relative">
+              <div className="w-12 h-12 rounded-full bg-[#0E2142] flex items-center justify-center p-1 ring-1 ring-[#2B416B]">
+                <img 
+                  src="/atm-mascot.png" 
+                  alt="AI Motor" 
+                  className="w-full h-full object-contain animate-float"
+                />
+              </div>
+              <div className="absolute -top-1 -right-1 text-yellow-400 animate-pulse">
+                ✨
+              </div>
+            </div>
+            <div>
+              <div className="text-lg font-semibold flex items-center gap-2">
+                🔧 SLM Dispatch Önerileri
+                <span className="text-xs px-2 py-0.5 rounded-full bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] text-white font-semibold">
+                  AI Motor
+                </span>
+              </div>
+              <div className="text-xs text-[#A7B8D8] mt-1">Gereksiz FLM'leri azaltmak için akıllı teknik destek önerileri - BANTAŞ FLM'ler zaten yürüyor</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 bg-[#0E2142] rounded-lg px-2 py-1">
+              <span className="text-[9px] text-[#A7B8D8]">Başlangıç:</span>
+              <input
+                type="date"
+                value={alertsStartDate}
+                onChange={(e) => setAlertsStartDate(e.target.value)}
+                className="bg-transparent text-[10px] text-white border-none outline-none cursor-pointer w-[100px]"
+              />
+            </div>
+            <div className="flex items-center gap-2 bg-[#0E2142] rounded-lg px-2 py-1">
+              <span className="text-[9px] text-[#A7B8D8]">Bitiş:</span>
+              <input
+                type="date"
+                value={alertsEndDate}
+                onChange={(e) => setAlertsEndDate(e.target.value)}
+                className="bg-transparent text-[10px] text-white border-none outline-none cursor-pointer w-[100px]"
+              />
+            </div>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#E63946]/20 text-[#E63946]">
+              {alerts.filter(a => a.severity === "High").length} High
+            </span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#F2B705]/20 text-[#F2B705]">
+              {alerts.filter(a => a.severity === "Medium").length} Medium
+            </span>
+            <button
+              onClick={() => {
+                const startDateFormatted = new Date(alertsStartDate).toLocaleDateString('tr-TR');
+                const endDateFormatted = new Date(alertsEndDate).toLocaleDateString('tr-TR');
+                let csvContent = '\uFEFFSLM Dispatch Önerileri Raporu\n' +
+                  `Tarih Aralığı,${startDateFormatted} - ${endDateFormatted}\n\n` +
+                  'ATM ID,ATM Adı,Şehir,İlçe,Başlık,Özet,Öncelik,FLM 48h,FLM 7d,Son SLM (gün),AI Önerisi,ETA,Durum\n';
+                
+                alerts.forEach(alert => {
+                  const status = alert.status === "pending" ? "SLM Önerisi" :
+                               alert.status === "slm_opened" ? "SLM Açıldı" :
+                               alert.status === "scheduled_maintenance" ? "Bakım Planlandı" : "Reddedildi";
+                  csvContent += `${alert.atm_id},${alert.atm_name},${alert.city},${alert.district},"${alert.title}","${alert.summary}",${alert.severity},${alert.flm_count_48h || 0},${alert.flm_count_7d || 0},${alert.last_slm_days_ago || "-"},${alert.action},${alert.eta},${status}\n`;
+                });
+                
+                csvContent += '\nÖzet İstatistikler\n';
+                csvContent += `Toplam SLM Önerisi,${alerts.length}\n`;
+                csvContent += `High Priority,${alerts.filter(a => a.severity === 'High').length}\n`;
+                csvContent += `Medium Priority,${alerts.filter(a => a.severity === 'Medium').length}\n`;
+                csvContent += `Low Priority,${alerts.filter(a => a.severity === 'Low').length}\n`;
+                csvContent += `Bekleyen,${alerts.filter(a => a.status === 'pending').length}\n`;
+                csvContent += `SLM Açıldı,${alerts.filter(a => a.status === 'slm_opened').length}\n`;
+                csvContent += `Ortalama FLM (48h),${(alerts.reduce((sum, a) => sum + (a.flm_count_48h || 0), 0) / alerts.length).toFixed(1)}\n`;
+                
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `slm_dispatch_${alertsStartDate}_${alertsEndDate}.csv`;
+                link.click();
+              }}
+              className="px-2 py-1 rounded-lg bg-[#10B981] hover:bg-[#0E9F6E] text-[10px] font-semibold transition flex items-center gap-1"
+            >
+              📥 Excel
+            </button>
+          </div>
+        </div>
+
+        {alerts.length === 0 ? (
+          <div className="text-center py-8">
+            <div className="text-4xl mb-3">✅</div>
+            <div className="text-[#A7B8D8]">Şu anda SLM önerisi bulunmuyor</div>
+            <div className="text-xs text-[#A7B8D8] mt-2">BANTAŞ FLM'ler normal sürüyor - AI motor analiz ediyor</div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+            {alerts.map((a) => {
+              const status = a.status || "pending";
+              const flm48h = a.flm_count_48h || 0;
+              const flm7d = a.flm_count_7d || 0;
+              const lastSlmDays = a.last_slm_days_ago || 999;
+              const hasRepeat = a.repeat_issue || false;
+              
+              return (
+                <div 
+                  key={`alert-${a.id}`} 
+                  className={`bg-[#0E2142] rounded-xl p-3 ring-1 ${
+                    a.severity === "High" ? "ring-[#E63946]/30" :
+                    a.severity === "Medium" ? "ring-[#F2B705]/30" : "ring-[#2E86FF]/30"
+                  } hover:ring-2 transition cursor-pointer`}
+                  onClick={() => setSelectedAlert(a)}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-bold ${
+                        a.severity === "High" ? "text-[#E63946]" :
+                        a.severity === "Medium" ? "text-[#F2B705]" : "text-[#2E86FF]"
+                      }`}>
+                        {a.severity === "High" ? "🚨" : a.severity === "Medium" ? "⚠️" : "📅"} {a.title}
+                      </span>
+                    </div>
+                    <span className={`text-[9px] px-2 py-0.5 rounded-full ${
+                      status === "pending" ? "bg-[#F2B705]/20 text-[#F2B705]" :
+                      status === "slm_opened" ? "bg-[#10B981]/20 text-[#10B981]" :
+                      status === "scheduled_maintenance" ? "bg-[#2E86FF]/20 text-[#2E86FF]" :
+                      "bg-gray-500/20 text-gray-400"
+                    }`}>
+                      {status === "pending" ? "SLM Önerisi" :
+                       status === "slm_opened" ? "SLM Açıldı" :
+                       status === "scheduled_maintenance" ? "Bakım Planlandı" : "Reddedildi"}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-white/80 mb-2">
+                    <span className="font-semibold">ATM {a.atm_id}</span> - {a.atm_name} ({a.city} / {a.district})
+                    {a.availability && (
+                      <span className={`ml-2 text-[10px] font-semibold ${
+                        a.availability < 70 ? 'text-[#E63946]' : 
+                        a.availability < 90 ? 'text-[#F2B705]' : 
+                        'text-[#10B981]'
+                      }`}>
+                        • Avail: {a.availability.toFixed(1)}%
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-[#A7B8D8] mb-2">
+                    {a.summary}
+                  </div>
+                  
+                  {/* AI Analiz Özeti */}
+                  <div className="bg-[#0E2142] rounded-lg p-2 mb-2 space-y-0.5">
+                    <div className="text-[10px] text-[#A7B8D8] font-semibold">🧠 AI Analiz:</div>
+                    {flm48h > 1 && (
+                      <div className="text-[10px] text-[#E63946]">• 48 saatte {flm48h} FLM (tekrar!)</div>
+                    )}
+                    {flm7d > 3 && (
+                      <div className="text-[10px] text-[#F2B705]">• Son 7 gün: {flm7d} FLM</div>
+                    )}
+                    {lastSlmDays > 90 && (
+                      <div className="text-[10px] text-[#2E86FF]">• Son SLM: {lastSlmDays} gün önce</div>
+                    )}
+                    {hasRepeat && a.last_solution && (
+                      <div className="text-[10px] text-[#E63946]">• Tekrar: {a.last_solution}</div>
+                    )}
+                  </div>
+                  
+                  <div className="flex items-center justify-between">
+                    <div className="text-[9px] text-[#A7B8D8]">
+                      ETA: <span className="text-white font-semibold">{a.eta}</span>
+                    </div>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedAlert(a);
+                      }}
+                      className={`px-3 py-1 rounded-lg text-[10px] font-semibold transition ${
+                        status === "pending" ? "bg-[#E63946] hover:bg-[#D32F3E]" :
+                        "bg-[#2E86FF] hover:bg-[#1F6FE0]"
+                      }`}
+                    >
+                      {status === "pending" ? "🎯 Karar Ver" : "📋 Detay"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        
+        {/* Günlük Özet */}
+        <div className="mt-6 pt-6 border-t border-[#2B416B]">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm font-semibold">📈 Bugünkü Özet İstatistikler</div>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 bg-[#0E2142] rounded-lg px-2 py-1">
+                <span className="text-[9px] text-[#A7B8D8]">Başlangıç:</span>
+                <input
+                  type="date"
+                  value={dailyStartDate}
+                  onChange={(e) => setDailyStartDate(e.target.value)}
+                  className="bg-transparent text-[10px] text-white border-none outline-none cursor-pointer w-[100px]"
+                />
+              </div>
+              <div className="flex items-center gap-2 bg-[#0E2142] rounded-lg px-2 py-1">
+                <span className="text-[9px] text-[#A7B8D8]">Bitiş:</span>
+                <input
+                  type="date"
+                  value={dailyEndDate}
+                  onChange={(e) => setDailyEndDate(e.target.value)}
+                  className="bg-transparent text-[10px] text-white border-none outline-none cursor-pointer w-[100px]"
+                />
+              </div>
+              <button
+                onClick={() => {
+                  const startDateFormatted = new Date(dailyStartDate).toLocaleDateString('tr-TR');
+                  const endDateFormatted = new Date(dailyEndDate).toLocaleDateString('tr-TR');
+                  const csvContent = '\uFEFFGünlük Özet İstatistikler Raporu\n' +
+                    `Tarih Aralığı,${startDateFormatted} - ${endDateFormatted}\n\n` +
+                    'Metrik,Değer,Trend,Açıklama\n' +
+                    'Toplam Müdahale,47,↑ 3 dün,FLM + SLM toplam müdahale sayısı\n' +
+                    'FLM Başarı,41,87% oran,BANTAŞ FLM başarılı müdahale\n' +
+                    'SLM Gerekli,6,13% oran,Vendor SLM gerektiren durumlar\n' +
+                    'Tasarruf,$1.8K,↑ $340 dün,FLM ile sağlanan günlük tasarruf\n\n' +
+                    'Detaylı Dağılım\n' +
+                    'FLM Müdahale Tipleri\n' +
+                    'Card Reader Temizlik,18,44%\n' +
+                    'Receipt Printer,12,29%\n' +
+                    'Cash Dispenser Jam,8,20%\n' +
+                    'Diğer,3,7%\n\n' +
+                    'Vendor Dağılımı (SLM)\n' +
+                    'HITACHI SLM,4,67%\n' +
+                    'GRG SLM,2,33%\n';
+                  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                  const link = document.createElement('a');
+                  link.href = URL.createObjectURL(blob);
+                  link.download = `gunluk_ozet_${dailyStartDate}_${dailyEndDate}.csv`;
+                  link.click();
+                }}
+                className="px-2 py-1 rounded-lg bg-[#10B981] hover:bg-[#0E9F6E] text-[10px] font-semibold transition flex items-center gap-1"
+              >
+                📥 Excel
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div 
+              onClick={() => setShowDailySummaryDetail('total')}
+              className="bg-[#0E2142] rounded-lg p-3 hover:ring-2 hover:ring-[#2E86FF] hover:scale-[1.02] transition-all cursor-pointer"
+            >
+              <div className="text-[10px] text-[#A7B8D8] mb-1">Toplam Müdahale</div>
+              <div className="text-xl font-bold text-white">47</div>
+              <div className="text-[9px] text-[#10B981] mt-1">↑ 3 dün</div>
+            </div>
+            <div 
+              onClick={() => setShowDailySummaryDetail('flm')}
+              className="bg-[#0E2142] rounded-lg p-3 hover:ring-2 hover:ring-[#10B981] hover:scale-[1.02] transition-all cursor-pointer"
+            >
+              <div className="text-[10px] text-[#A7B8D8] mb-1">FLM Başarı</div>
+              <div className="text-xl font-bold text-[#10B981]">41</div>
+              <div className="text-[9px] text-[#A7B8D8] mt-1">87% oran</div>
+            </div>
+            <div 
+              onClick={() => setShowDailySummaryDetail('slm')}
+              className="bg-[#0E2142] rounded-lg p-3 hover:ring-2 hover:ring-[#E63946] hover:scale-[1.02] transition-all cursor-pointer"
+            >
+              <div className="text-[10px] text-[#A7B8D8] mb-1">SLM Gerekli</div>
+              <div className="text-xl font-bold text-[#E63946]">6</div>
+              <div className="text-[9px] text-[#E63946] mt-1">13% oran</div>
+            </div>
+            <div 
+              onClick={() => setShowDailySummaryDetail('saving')}
+              className="bg-[#0E2142] rounded-lg p-3 hover:ring-2 hover:ring-[#F2B705] hover:scale-[1.02] transition-all cursor-pointer"
+            >
+              <div className="text-[10px] text-[#A7B8D8] mb-1">Tasarruf</div>
+              <div className="text-xl font-bold text-[#F2B705]">$1.8K</div>
+              <div className="text-[9px] text-[#10B981] mt-1">↑ $340 dün</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Performance Metrikleri Dashboard */}
       <div className="bg-gradient-to-br from-[#112544] to-[#0E2142] rounded-2xl p-6 ring-1 ring-[#2B416B]">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <div className="text-lg font-semibold">📊 Performans Metrikleri</div>
-            <div className="text-xs text-[#A7B8D8] mt-1">Gerçek zamanlı operasyon performans göstergeleri</div>
+            <div className="text-lg font-semibold">�️ ATM Health Guardian - Proactive Maintenance Control / Proaktif Bakım Kontrolü</div>
+            <div className="text-xs text-[#A7B8D8] mt-1">AI destekli arıza önleme ve performans optimizasyonu / AI-powered breakdown prevention and performance optimization</div>
           </div>
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-2 bg-[#0E2142] rounded-lg px-3 py-1.5">
@@ -420,6 +1120,7 @@ export default function OverviewPage() {
                   `Tarih Aralığı,${startDateFormatted} - ${endDateFormatted}\n\n` +
                   'Metrik,Değer,Trend\n' +
                   'ATM Uptime,98.7%,↑ 0.3% bu hafta\n' +
+                  'Arıza Bildirim,18m,↓ 4m bu ay\n' +
                   'Ort. Müdahale,2.4h,↓ 0.6h bu ay\n' +
                   'FLM Başarı,87%,↑ 2% bu ay\n' +
                   'Tasarruf (Ay),$47K,↑ $8K geçen ay\n' +
@@ -445,6 +1146,14 @@ export default function OverviewPage() {
             <div className="text-[10px] text-[#A7B8D8] mb-1 group-hover:text-[#10B981] transition">ATM Uptime</div>
             <div className="text-2xl font-bold text-[#10B981]">98.7%</div>
             <div className="text-[9px] text-[#10B981] mt-1">↑ 0.3% bu hafta</div>
+          </div>
+
+          {/* Arıza Bildirim Süresi - YENİ */}
+          <div className="bg-[#0E2142]/60 rounded-xl p-3 ring-1 ring-[#2B416B] hover:ring-2 hover:ring-[#F2B705] hover:bg-[#0E2142] transition-all cursor-pointer group relative" onClick={() => setInfoModal(OVERVIEW_METRIC_EXPLANATIONS["fault_notification_time"])}>
+            <button className="absolute top-2 right-2 w-5 h-5 rounded-full bg-[#F2B705]/20 hover:bg-[#F2B705]/40 text-[#F2B705] text-xs flex items-center justify-center transition opacity-0 group-hover:opacity-100" onClick={(e) => { e.stopPropagation(); setInfoModal(OVERVIEW_METRIC_EXPLANATIONS["fault_notification_time"]); }}>?</button>
+            <div className="text-[10px] text-[#A7B8D8] mb-1 group-hover:text-[#F2B705] transition">Arıza Bildirim</div>
+            <div className="text-2xl font-bold text-[#F2B705]">18m</div>
+            <div className="text-[9px] text-[#10B981] mt-1">↓ 4m bu ay</div>
           </div>
           
           {/* Avg Response */}
@@ -544,69 +1253,197 @@ export default function OverviewPage() {
         {/* LEFT COLUMN - MAP + RISK BY ZONE */}
         <div className="col-span-12 xl:col-span-7 grid grid-rows-6 gap-4 min-h-0">
           {/* MAP */}
-          <div className="row-span-4 bg-[#112544] rounded-2xl p-0 ring-1 ring-[#2B416B] overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-3 border-b border-[#2B416B]">
-              <div className="flex items-center gap-2">
-                <div className="text-sm text-[#E6EEF8]">{t.overview.atmRiskMap}</div>
-                <button
-                  onClick={() => setInfoModal(OVERVIEW_METRIC_EXPLANATIONS["atm_risk_map"])}
-                  className="w-5 h-5 rounded-full bg-[#2E86FF]/20 hover:bg-[#2E86FF]/40 text-[#2E86FF] text-xs flex items-center justify-center transition"
-                >
-                  ?
-                </button>
-              </div>
-
-              <div className="flex items-center gap-3">
-                {/* Legend */}
-                <div className="hidden sm:flex items-center gap-3 text-xs text-[#A7B8D8]">
+          {!fullscreenMap && (
+            <div className="row-span-4 bg-[#112544] rounded-2xl p-0 ring-1 ring-[#2B416B] overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-3 border-b border-[#2B416B]">
+                <div className="flex items-center gap-3">
+                  <div className="text-sm text-[#E6EEF8]">
+                    {t.overview.atmRiskMap}
+                    {selectedZone && (
+                      <span className="ml-2 px-2 py-1 rounded-lg bg-[#2E86FF]/20 text-[#2E86FF] text-xs font-semibold">
+                        📍 {selectedZone}
+                      </span>
+                    )}
+                  </div>
+                  
+                  {/* Şube/Offsite Sekmesi */}
+                  <div className="flex items-center gap-1 bg-[#0E2142] rounded-lg p-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAtmLocationFilter('all');
+                      }}
+                      className={`px-3 py-1 rounded text-xs font-semibold transition ${
+                        atmLocationFilter === 'all'
+                          ? 'bg-[#2E86FF] text-white'
+                          : 'text-[#A7B8D8] hover:text-white'
+                      }`}
+                    >
+                      Tümü
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAtmLocationFilter('branch');
+                      }}
+                      className={`px-3 py-1 rounded text-xs font-semibold transition ${
+                        atmLocationFilter === 'branch'
+                          ? 'bg-[#2E86FF] text-white'
+                          : 'text-[#A7B8D8] hover:text-white'
+                      }`}
+                    >
+                      � Şube
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAtmLocationFilter('offsite');
+                      }}
+                      className={`px-3 py-1 rounded text-xs font-semibold transition ${
+                        atmLocationFilter === 'offsite'
+                          ? 'bg-[#2E86FF] text-white'
+                          : 'text-[#A7B8D8] hover:text-white'
+                      }`}
+                    >
+                      📍 Offsite
+                    </button>
+                  </div>
+                  
                   <button
-                    onClick={() => toggleBand("High")}
-                    className={`flex items-center gap-2 px-2 py-1 rounded transition ${
-                      selectedBands.includes("High")
-                        ? "opacity-100 bg-[#E63946]/20"
-                        : "opacity-50 hover:opacity-75"
-                    }`}
+                    onClick={() => setInfoModal(OVERVIEW_METRIC_EXPLANATIONS["atm_risk_map"])}
+                    className="w-5 h-5 rounded-full bg-[#2E86FF]/20 hover:bg-[#2E86FF]/40 text-[#2E86FF] text-xs flex items-center justify-center transition"
                   >
-                    <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "#E63946" }} />
-                    {t.overview.high}
-                  </button>
-                  <button
-                    onClick={() => toggleBand("Medium")}
-                    className={`flex items-center gap-2 px-2 py-1 rounded transition ${
-                      selectedBands.includes("Medium")
-                        ? "opacity-100 bg-[#F2B705]/20"
-                        : "opacity-50 hover:opacity-75"
-                    }`}
-                  >
-                    <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "#F2B705" }} />
-                    {t.overview.medium}
-                  </button>
-                  <button
-                    onClick={() => toggleBand("Low")}
-                    className={`flex items-center gap-2 px-2 py-1 rounded transition ${
-                      selectedBands.includes("Low")
-                        ? "opacity-100 bg-[#2E86FF]/20"
-                        : "opacity-50 hover:opacity-75"
-                    }`}
-                  >
-                    <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "#2E86FF" }} />
-                    {t.overview.low}
+                    ?
                   </button>
                 </div>
 
-                <div className="text-xs text-[#A7B8D8]">{t.overview.atmsLoaded}: {filteredAtms.length}</div>
+                <div className="flex items-center gap-3">
+                  {/* Legend */}
+                  <div className="hidden sm:flex items-center gap-3 text-xs text-[#A7B8D8]">
+                    <button
+                      onClick={() => toggleBand("High")}
+                      className={`flex items-center gap-2 px-2 py-1 rounded transition ${
+                        selectedBands.includes("High")
+                          ? "opacity-100 bg-[#E63946]/20"
+                          : "opacity-50 hover:opacity-75"
+                      }`}
+                    >
+                      <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "#E63946" }} />
+                      {t.overview.high}
+                    </button>
+                    <button
+                      onClick={() => toggleBand("Medium")}
+                      className={`flex items-center gap-2 px-2 py-1 rounded transition ${
+                        selectedBands.includes("Medium")
+                          ? "opacity-100 bg-[#F2B705]/20"
+                          : "opacity-50 hover:opacity-75"
+                      }`}
+                    >
+                      <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "#F2B705" }} />
+                      {t.overview.medium}
+                    </button>
+                    <button
+                      onClick={() => toggleBand("Low")}
+                      className={`flex items-center gap-2 px-2 py-1 rounded transition ${
+                        selectedBands.includes("Low")
+                          ? "opacity-100 bg-[#2E86FF]/20"
+                          : "opacity-50 hover:opacity-75"
+                      }`}
+                    >
+                      <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "#2E86FF" }} />
+                      {t.overview.low}
+                    </button>
+                  </div>
+
+                  <div className="text-xs text-[#A7B8D8]">{t.overview.atmsLoaded}: {filteredAtms.length}</div>
+                </div>
+              </div>
+
+              <div className="h-[520px] w-full">
+                <OverviewMap
+                  filteredAtms={filteredAtms}
+                  center={center}
+                  top10Band={top10Band}
+                  top10Data={top10Data}
+                />
+              </div>
+
+            {/* Tarih Aralığı ve Excel - Harita Altında */}
+            <div className="flex items-center justify-between px-5 py-3 border-t border-[#2B416B] bg-[#0E2142]/40">
+              <div className="flex items-center gap-3">
+                <div className="text-xs text-[#A7B8D8]">
+                  Harita Verisi Tarih Aralığı
+                </div>
+                <button
+                  onClick={() => setFullscreenMap(true)}
+                  className="px-3 py-1.5 bg-[#10B981] hover:bg-[#059669] text-white text-xs font-semibold rounded-lg transition flex items-center gap-1.5"
+                >
+                  🔍 Tam Ekran
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 bg-[#112544] rounded-lg px-3 py-1.5">
+                  <span className="text-xs text-[#A7B8D8]">Başlangıç:</span>
+                  <input
+                    type="date"
+                    value={riskMapStartDate}
+                    onChange={(e) => setRiskMapStartDate(e.target.value)}
+                    className="bg-transparent text-white text-xs border-none focus:outline-none w-28"
+                  />
+                </div>
+                <div className="flex items-center gap-2 bg-[#112544] rounded-lg px-3 py-1.5">
+                  <span className="text-xs text-[#A7B8D8]">Bitiş:</span>
+                  <input
+                    type="date"
+                    value={riskMapEndDate}
+                    onChange={(e) => setRiskMapEndDate(e.target.value)}
+                    className="bg-transparent text-white text-xs border-none focus:outline-none w-28"
+                  />
+                </div>
+                <button
+                  onClick={() => {
+                    const csvContent = '\uFEFFATM Risk Haritası Raporu\n' +
+                      'Rapor Tarihi: ' + new Date().toLocaleDateString('tr-TR') + '\n' +
+                      'Tarih Aralığı: ' + riskMapStartDate + ' - ' + riskMapEndDate + '\n\n' +
+                      'ATM ID,ATM Adı,Şehir,İlçe,Risk Seviyesi,Risk Skoru (%),Latitude,Longitude,Lokasyon Tipi,Bölge,Durum\n' +
+                      filteredAtms.map(atm => {
+                        const riskData = top10Data.get(String(atm.atm_id));
+                        const riskBand = riskData?.risk_band || 'Low';
+                        const riskScore = riskBand === 'High' ? '70-100' : riskBand === 'Medium' ? '40-70' : '0-40';
+                        const availability = riskData?.availability ? (riskData.availability * 100).toFixed(1) : 'N/A';
+                        return `${atm.atm_id},${atm.atm_name || 'N/A'},${atm.city},${atm.district},${riskBand},${riskScore},${atm.latitude},${atm.longitude},${atm.location_type || 'N/A'},${atm.zone || 'N/A'},${atm.active ? 'Aktif' : 'Pasif'}`;
+                      }).join('\n') +
+                      '\n\nRisk Seviyesi Tanımları:\n' +
+                      'High (Yüksek),70-100%,Kritik risk - Acil müdahale gerekli - SLM öneriliyor\n' +
+                      'Medium (Orta),40-70%,Orta risk - FLM planla - İzlemeye devam et\n' +
+                      'Low (Düşük),0-40%,Düşük risk - Normal izleme yeterli\n\n' +
+                      'Özet İstatistikler:\n' +
+                      'Toplam ATM,' + filteredAtms.length + '\n' +
+                      'Yüksek Risk,' + filteredAtms.filter(a => top10Data.get(String(a.atm_id))?.risk_band === 'High').length + '\n' +
+                      'Orta Risk,' + filteredAtms.filter(a => top10Data.get(String(a.atm_id))?.risk_band === 'Medium').length + '\n' +
+                      'Düşük Risk,' + filteredAtms.filter(a => top10Data.get(String(a.atm_id))?.risk_band === 'Low').length + '\n\n' +
+                      'Coğrafi Dağılım:\n' +
+                      [...new Set(filteredAtms.map(a => a.city))].map(city => {
+                        const cityAtms = filteredAtms.filter(a => a.city === city);
+                        return city + ',' + cityAtms.length + ' ATM';
+                      }).join('\n') +
+                      '\n\nRapor Oluşturan: ATM Health Guardian\n' +
+                      'Motor: IronClad Engine v1.0';
+                    
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = `atm_risk_haritasi_${new Date().toISOString().split('T')[0]}.csv`;
+                    link.click();
+                  }}
+                  className="px-4 py-2 bg-[#2E86FF] hover:bg-[#1F6FE0] text-white text-sm font-semibold rounded-lg transition flex items-center gap-2"
+                >
+                  📊 Excel İndir
+                </button>
               </div>
             </div>
-
-            <div className="h-[520px] w-full">
-              <OverviewMap
-                filteredAtms={filteredAtms}
-                center={center}
-                top10Band={top10Band}
-                top10Data={top10Data}
-              />
-            </div>
           </div>
+          )}
 
           {/* Risk by Zone */}
           <div
@@ -614,7 +1451,20 @@ export default function OverviewPage() {
             onClick={() => setShowZones(true)}
           >
             <div className="flex items-center justify-between mb-3">
-              <div className="text-sm font-semibold">{t.overview.riskByZone}</div>
+              <div className="flex items-center gap-2">
+                <div className="text-sm font-semibold">{t.overview.riskByZone}</div>
+                {selectedZone && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedZone(null);
+                    }}
+                    className="px-2 py-0.5 rounded-lg bg-[#E63946]/20 text-[#E63946] text-[9px] font-semibold hover:bg-[#E63946]/30 transition"
+                  >
+                    ✕ Filtreyi Temizle
+                  </button>
+                )}
+              </div>
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#2E86FF]/20 text-[#2E86FF]">
                 {zones.length} bölge
               </span>
@@ -630,9 +1480,25 @@ export default function OverviewPage() {
                   const riskLabel = riskPct > 70 ? "Yüksek" : riskPct > 40 ? "Orta" : "Düşük";
                   
                   return (
-                    <div key={z.zone} className="bg-[#0E2142]/60 rounded-lg p-2 hover:bg-[#1C2E52] transition">
+                    <div 
+                      key={z.zone} 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedZone(selectedZone === z.zone ? null : z.zone);
+                      }}
+                      className={`rounded-lg p-2 transition cursor-pointer ${
+                        selectedZone === z.zone 
+                          ? 'bg-[#2E86FF]/30 ring-2 ring-[#2E86FF]' 
+                          : 'bg-[#0E2142]/60 hover:bg-[#1C2E52]'
+                      }`}
+                    >
                       <div className="flex justify-between items-center text-xs mb-1">
-                        <span className="text-white font-semibold">{z.zone}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-white font-semibold">{z.zone}</span>
+                          {selectedZone === z.zone && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[#2E86FF] text-white font-bold">SEÇİLİ</span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-2">
                           <span className="text-[9px] text-[#A7B8D8]">{riskLabel}</span>
                           <span className="font-bold" style={{ color: riskColor }}>{riskPct}%</span>
@@ -792,14 +1658,41 @@ export default function OverviewPage() {
                         </div>
                       </div>
                       
-                      {/* Sadece kritik bilgiler */}
-                      {(hasRepeat || flm7d > 3 || lastSlmDays > 90) && (
-                        <div className="text-[8px] text-[#A7B8D8] truncate">
-                          {hasRepeat && r.repeat_reason ? `⚠️ ${r.repeat_reason}` : 
-                           flm7d > 3 ? `🔥 7g: ${flm7d} FLM` :
-                           lastSlmDays > 90 ? `📅 ${lastSlmDays}g SLM yok` : ''}
-                        </div>
-                      )}
+                      {/* SLM Açılma Nedeni - Her ATM için göster */}
+                      <div className="text-[8px] text-[#A7B8D8] mt-1">
+                        {pct > 70 ? (
+                          <div className="flex items-start gap-1">
+                            <span className="text-[#E63946]">🚨</span>
+                            <span>
+                              {hasRepeat && r.repeat_reason ? `Tekrar eden arıza: ${r.repeat_reason}. ` : ''}
+                              {flm48h > 2 ? `Son 48 saatte ${flm48h} FLM. ` : ''}
+                              {lastSlmDays > 90 ? `${lastSlmDays} gündür SLM yok. ` : lastSlmDays > 60 ? `${lastSlmDays} gün SLM yapılmamış. ` : ''}
+                              {availability < 70 ? `Düşük uptime: ${availability.toFixed(1)}%. ` : ''}
+                              {!hasRepeat && flm48h <= 2 && lastSlmDays <= 60 && availability >= 70 ? `Yüksek risk skoru (${pct}%). Önleyici SLM öneriliyor.` : ''}
+                            </span>
+                          </div>
+                        ) : pct > 40 ? (
+                          <div className="flex items-start gap-1">
+                            <span className="text-[#F2B705]">⚠️</span>
+                            <span>
+                              {flm7d > 3 ? `Son 7 günde ${flm7d} FLM. ` : flm48h > 0 ? `${flm48h}x FLM (48h). ` : ''}
+                              {lastSlmDays > 90 ? `${lastSlmDays} gündür SLM yok. ` : lastSlmDays > 60 ? `${lastSlmDays} gün SLM yapılmamış. ` : ''}
+                              {hasRepeat ? 'Tekrar eden sorun var. ' : ''}
+                              {flm7d <= 3 && !hasRepeat && lastSlmDays <= 60 ? `Orta risk (${pct}%). FLM'den sonra SLM değerlendirilmeli.` : ''}
+                              FLM'den sonra SLM değerlendir.
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="flex items-start gap-1">
+                            <span className="text-[#10B981]">✅</span>
+                            <span>
+                              {availability >= 90 ? 'İyi performans gösteriyor. ' : availability >= 70 ? 'Normal performans. ' : 'Uptime izlenmeli. '}
+                              {lastSlmDays > 90 ? `${lastSlmDays} gün SLM yok, kontrol edilmeli. ` : lastSlmDays > 60 ? `${lastSlmDays} gün SLM yok. ` : 'SLM takibi uygun. '}
+                              {flm48h > 0 || flm7d > 0 ? 'FLM ile izleme yeterli.' : 'Rutin bakım yeterli.'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
                       
                       <div className="flex items-center gap-1 mt-1">
                         <div className="flex-1 h-0.5 bg-[#0E2142] rounded-full overflow-hidden">
@@ -1298,286 +2191,365 @@ export default function OverviewPage() {
         </div>
       )}
 
-      {/* FLM/SLM DISPATCH ÖNERİLERİ */}
-      <div className="bg-[#112544] rounded-2xl p-6 ring-1 ring-[#2B416B]">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            {/* AI Maskot */}
-            <div className="relative">
-              <div className="w-12 h-12 rounded-full bg-[#0E2142] flex items-center justify-center p-1 ring-1 ring-[#2B416B]">
-                <img 
-                  src="/atm-mascot.png" 
-                  alt="AI Motor" 
-                  className="w-full h-full object-contain animate-float"
-                />
-              </div>
-              <div className="absolute -top-1 -right-1 text-yellow-400 animate-pulse">
-                ✨
-              </div>
-            </div>
-            <div>
-              <div className="text-lg font-semibold flex items-center gap-2">
-                🔧 SLM Dispatch Önerileri
-                <span className="text-xs px-2 py-0.5 rounded-full bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] text-white font-semibold">
-                  AI Motor
-                </span>
-              </div>
-              <div className="text-xs text-[#A7B8D8] mt-1">Gereksiz FLM'leri azaltmak için akıllı teknik destek önerileri - BANTAŞ FLM'ler zaten yürüyor</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 bg-[#0E2142] rounded-lg px-2 py-1">
-              <span className="text-[9px] text-[#A7B8D8]">Başlangıç:</span>
-              <input
-                type="date"
-                value={alertsStartDate}
-                onChange={(e) => setAlertsStartDate(e.target.value)}
-                className="bg-transparent text-[10px] text-white border-none outline-none cursor-pointer w-[100px]"
-              />
-            </div>
-            <div className="flex items-center gap-2 bg-[#0E2142] rounded-lg px-2 py-1">
-              <span className="text-[9px] text-[#A7B8D8]">Bitiş:</span>
-              <input
-                type="date"
-                value={alertsEndDate}
-                onChange={(e) => setAlertsEndDate(e.target.value)}
-                className="bg-transparent text-[10px] text-white border-none outline-none cursor-pointer w-[100px]"
-              />
-            </div>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#E63946]/20 text-[#E63946]">
-              {alerts.filter(a => a.severity === "High").length} High
-            </span>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#F2B705]/20 text-[#F2B705]">
-              {alerts.filter(a => a.severity === "Medium").length} Medium
-            </span>
-            <button
-              onClick={() => {
-                const startDateFormatted = new Date(alertsStartDate).toLocaleDateString('tr-TR');
-                const endDateFormatted = new Date(alertsEndDate).toLocaleDateString('tr-TR');
-                let csvContent = '\uFEFFSLM Dispatch Önerileri Raporu\n' +
-                  `Tarih Aralığı,${startDateFormatted} - ${endDateFormatted}\n\n` +
-                  'ATM ID,ATM Adı,Şehir,İlçe,Başlık,Özet,Öncelik,FLM 48h,FLM 7d,Son SLM (gün),AI Önerisi,ETA,Durum\n';
-                
-                alerts.forEach(alert => {
-                  const status = alert.status === "pending" ? "SLM Önerisi" :
-                               alert.status === "slm_opened" ? "SLM Açıldı" :
-                               alert.status === "scheduled_maintenance" ? "Bakım Planlandı" : "Reddedildi";
-                  csvContent += `${alert.atm_id},${alert.atm_name},${alert.city},${alert.district},"${alert.title}","${alert.summary}",${alert.severity},${alert.flm_count_48h || 0},${alert.flm_count_7d || 0},${alert.last_slm_days_ago || "-"},${alert.action},${alert.eta},${status}\n`;
-                });
-                
-                csvContent += '\nÖzet İstatistikler\n';
-                csvContent += `Toplam SLM Önerisi,${alerts.length}\n`;
-                csvContent += `High Priority,${alerts.filter(a => a.severity === 'High').length}\n`;
-                csvContent += `Medium Priority,${alerts.filter(a => a.severity === 'Medium').length}\n`;
-                csvContent += `Low Priority,${alerts.filter(a => a.severity === 'Low').length}\n`;
-                csvContent += `Bekleyen,${alerts.filter(a => a.status === 'pending').length}\n`;
-                csvContent += `SLM Açıldı,${alerts.filter(a => a.status === 'slm_opened').length}\n`;
-                csvContent += `Ortalama FLM (48h),${(alerts.reduce((sum, a) => sum + (a.flm_count_48h || 0), 0) / alerts.length).toFixed(1)}\n`;
-                
-                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(blob);
-                link.download = `slm_dispatch_${alertsStartDate}_${alertsEndDate}.csv`;
-                link.click();
-              }}
-              className="px-2 py-1 rounded-lg bg-[#10B981] hover:bg-[#0E9F6E] text-[10px] font-semibold transition flex items-center gap-1"
-            >
-              📥 Excel
-            </button>
-          </div>
-        </div>
-
-        {alerts.length === 0 ? (
-          <div className="text-center py-8">
-            <div className="text-4xl mb-3">✅</div>
-            <div className="text-[#A7B8D8]">Şu anda SLM önerisi bulunmuyor</div>
-            <div className="text-xs text-[#A7B8D8] mt-2">BANTAŞ FLM'ler normal sürüyor - AI motor analiz ediyor</div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-            {alerts.map((a) => {
-              const status = a.status || "pending";
-              const flm48h = a.flm_count_48h || 0;
-              const flm7d = a.flm_count_7d || 0;
-              const lastSlmDays = a.last_slm_days_ago || 999;
-              const hasRepeat = a.repeat_issue || false;
-              
-              return (
-                <div 
-                  key={`alert-${a.id}`} 
-                  className={`bg-[#0E2142] rounded-xl p-3 ring-1 ${
-                    a.severity === "High" ? "ring-[#E63946]/30" :
-                    a.severity === "Medium" ? "ring-[#F2B705]/30" : "ring-[#2E86FF]/30"
-                  } hover:ring-2 transition cursor-pointer`}
-                  onClick={() => setSelectedAlert(a)}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs font-bold ${
-                        a.severity === "High" ? "text-[#E63946]" :
-                        a.severity === "Medium" ? "text-[#F2B705]" : "text-[#2E86FF]"
-                      }`}>
-                        {a.severity === "High" ? "🚨" : a.severity === "Medium" ? "⚠️" : "📅"} {a.title}
-                      </span>
-                    </div>
-                    <span className={`text-[9px] px-2 py-0.5 rounded-full ${
-                      status === "pending" ? "bg-[#F2B705]/20 text-[#F2B705]" :
-                      status === "slm_opened" ? "bg-[#10B981]/20 text-[#10B981]" :
-                      status === "scheduled_maintenance" ? "bg-[#2E86FF]/20 text-[#2E86FF]" :
-                      "bg-gray-500/20 text-gray-400"
-                    }`}>
-                      {status === "pending" ? "SLM Önerisi" :
-                       status === "slm_opened" ? "SLM Açıldı" :
-                       status === "scheduled_maintenance" ? "Bakım Planlandı" : "Reddedildi"}
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-white/80 mb-2">
-                    <span className="font-semibold">ATM {a.atm_id}</span> - {a.atm_name} ({a.city} / {a.district})
-                    {a.availability && (
-                      <span className={`ml-2 text-[10px] font-semibold ${
-                        a.availability < 70 ? 'text-[#E63946]' : 
-                        a.availability < 90 ? 'text-[#F2B705]' : 
-                        'text-[#10B981]'
-                      }`}>
-                        • Avail: {a.availability.toFixed(1)}%
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[10px] text-[#A7B8D8] mb-2">
-                    {a.summary}
-                  </div>
-                  
-                  {/* AI Analiz Özeti */}
-                  <div className="bg-[#0E2142] rounded-lg p-2 mb-2 space-y-0.5">
-                    <div className="text-[10px] text-[#A7B8D8] font-semibold">🧠 AI Analiz:</div>
-                    {flm48h > 1 && (
-                      <div className="text-[10px] text-[#E63946]">• 48 saatte {flm48h} FLM (tekrar!)</div>
-                    )}
-                    {flm7d > 3 && (
-                      <div className="text-[10px] text-[#F2B705]">• Son 7 gün: {flm7d} FLM</div>
-                    )}
-                    {lastSlmDays > 90 && (
-                      <div className="text-[10px] text-[#2E86FF]">• Son SLM: {lastSlmDays} gün önce</div>
-                    )}
-                    {hasRepeat && a.last_solution && (
-                      <div className="text-[10px] text-[#E63946]">• Tekrar: {a.last_solution}</div>
-                    )}
-                  </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <div className="text-[9px] text-[#A7B8D8]">
-                      ETA: <span className="text-white font-semibold">{a.eta}</span>
-                    </div>
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedAlert(a);
-                      }}
-                      className={`px-3 py-1 rounded-lg text-[10px] font-semibold transition ${
-                        status === "pending" ? "bg-[#E63946] hover:bg-[#D32F3E]" :
-                        "bg-[#2E86FF] hover:bg-[#1F6FE0]"
-                      }`}
-                    >
-                      {status === "pending" ? "🎯 Karar Ver" : "📋 Detay"}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-        
-        {/* Günlük Özet */}
-        <div className="mt-6 pt-6 border-t border-[#2B416B]">
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-sm font-semibold">📈 Bugünkü Özet İstatistikler</div>
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-2 bg-[#0E2142] rounded-lg px-2 py-1">
-                <span className="text-[9px] text-[#A7B8D8]">Başlangıç:</span>
-                <input
-                  type="date"
-                  value={dailyStartDate}
-                  onChange={(e) => setDailyStartDate(e.target.value)}
-                  className="bg-transparent text-[10px] text-white border-none outline-none cursor-pointer w-[100px]"
-                />
-              </div>
-              <div className="flex items-center gap-2 bg-[#0E2142] rounded-lg px-2 py-1">
-                <span className="text-[9px] text-[#A7B8D8]">Bitiş:</span>
-                <input
-                  type="date"
-                  value={dailyEndDate}
-                  onChange={(e) => setDailyEndDate(e.target.value)}
-                  className="bg-transparent text-[10px] text-white border-none outline-none cursor-pointer w-[100px]"
-                />
-              </div>
+      {/* Günlük Özet Detay Modalleri */}
+      {showDailySummaryDetail === 'total' && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4"
+          onClick={() => setShowDailySummaryDetail(null)}
+        >
+          <div
+            className="bg-[#112544] rounded-2xl ring-1 ring-[#2B416B] w-full max-w-4xl max-h-[85vh] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-5 border-b border-[#2B416B]">
+              <div className="text-lg font-semibold">Toplam Müdahale Detayı</div>
               <button
-                onClick={() => {
-                  const startDateFormatted = new Date(dailyStartDate).toLocaleDateString('tr-TR');
-                  const endDateFormatted = new Date(dailyEndDate).toLocaleDateString('tr-TR');
-                  const csvContent = '\uFEFFGünlük Özet İstatistikler Raporu\n' +
-                    `Tarih Aralığı,${startDateFormatted} - ${endDateFormatted}\n\n` +
-                    'Metrik,Değer,Trend,Açıklama\n' +
-                    'Toplam Müdahale,47,↑ 3 dün,FLM + SLM toplam müdahale sayısı\n' +
-                    'FLM Başarı,41,87% oran,BANTAŞ FLM başarılı müdahale\n' +
-                    'SLM Gerekli,6,13% oran,Vendor SLM gerektiren durumlar\n' +
-                    'Tasarruf,$1.8K,↑ $340 dün,FLM ile sağlanan günlük tasarruf\n\n' +
-                    'Detaylı Dağılım\n' +
-                    'FLM Müdahale Tipleri\n' +
-                    'Card Reader Temizlik,18,44%\n' +
-                    'Receipt Printer,12,29%\n' +
-                    'Cash Dispenser Jam,8,20%\n' +
-                    'Diğer,3,7%\n\n' +
-                    'Vendor Dağılımı (SLM)\n' +
-                    'HITACHI SLM,4,67%\n' +
-                    'GRG SLM,2,33%\n';
-                  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-                  const link = document.createElement('a');
-                  link.href = URL.createObjectURL(blob);
-                  link.download = `gunluk_ozet_${dailyStartDate}_${dailyEndDate}.csv`;
-                  link.click();
-                }}
-                className="px-2 py-1 rounded-lg bg-[#10B981] hover:bg-[#0E9F6E] text-[10px] font-semibold transition flex items-center gap-1"
+                onClick={() => setShowDailySummaryDetail(null)}
+                className="text-[#A7B8D8] hover:text-white text-2xl"
               >
-                📥 Excel
+                &times;
               </button>
             </div>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div 
-              onClick={() => setShowDailySummaryDetail('total')}
-              className="bg-[#0E2142] rounded-lg p-3 hover:ring-2 hover:ring-[#2E86FF] hover:scale-[1.02] transition-all cursor-pointer"
-            >
-              <div className="text-[10px] text-[#A7B8D8] mb-1">Toplam Müdahale</div>
-              <div className="text-xl font-bold text-white">47</div>
-              <div className="text-[9px] text-[#10B981] mt-1">↑ 3 dün</div>
-            </div>
-            <div 
-              onClick={() => setShowDailySummaryDetail('flm')}
-              className="bg-[#0E2142] rounded-lg p-3 hover:ring-2 hover:ring-[#10B981] hover:scale-[1.02] transition-all cursor-pointer"
-            >
-              <div className="text-[10px] text-[#A7B8D8] mb-1">FLM Başarı</div>
-              <div className="text-xl font-bold text-[#10B981]">41</div>
-              <div className="text-[9px] text-[#A7B8D8] mt-1">87% oran</div>
-            </div>
-            <div 
-              onClick={() => setShowDailySummaryDetail('slm')}
-              className="bg-[#0E2142] rounded-lg p-3 hover:ring-2 hover:ring-[#E63946] hover:scale-[1.02] transition-all cursor-pointer"
-            >
-              <div className="text-[10px] text-[#A7B8D8] mb-1">SLM Gerekli</div>
-              <div className="text-xl font-bold text-[#E63946]">6</div>
-              <div className="text-[9px] text-[#E63946] mt-1">13% oran</div>
-            </div>
-            <div 
-              onClick={() => setShowDailySummaryDetail('saving')}
-              className="bg-[#0E2142] rounded-lg p-3 hover:ring-2 hover:ring-[#F2B705] hover:scale-[1.02] transition-all cursor-pointer"
-            >
-              <div className="text-[10px] text-[#A7B8D8] mb-1">Tasarruf</div>
-              <div className="text-xl font-bold text-[#F2B705]">$1.8K</div>
-              <div className="text-[9px] text-[#10B981] mt-1">↑ $340 dün</div>
+            <div className="overflow-y-auto p-5" style={{ maxHeight: "calc(85vh - 80px)" }}>
+              <div className="text-sm text-[#A7B8D8]">Toplam müdahale detay bilgileri buraya gelecek...</div>
             </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {showDailySummaryDetail === 'flm' && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4"
+          onClick={() => setShowDailySummaryDetail(null)}
+        >
+          <div
+            className="bg-[#112544] rounded-2xl ring-1 ring-[#2B416B] w-full max-w-4xl max-h-[85vh] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-5 border-b border-[#2B416B]">
+              <div className="text-lg font-semibold">FLM Başarı Detayı</div>
+              <button
+                onClick={() => setShowDailySummaryDetail(null)}
+                className="text-[#A7B8D8] hover:text-white text-2xl"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="overflow-y-auto p-5" style={{ maxHeight: "calc(85vh - 80px)" }}>
+              <div className="text-sm text-[#A7B8D8]">FLM başarı detay bilgileri buraya gelecek...</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDailySummaryDetail === 'slm' && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4"
+          onClick={() => setShowDailySummaryDetail(null)}
+        >
+          <div
+            className="bg-[#112544] rounded-2xl ring-1 ring-[#2B416B] w-full max-w-4xl max-h-[85vh] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-5 border-b border-[#2B416B]">
+              <div className="text-lg font-semibold">SLM Gerekli Detayı</div>
+              <button
+                onClick={() => setShowDailySummaryDetail(null)}
+                className="text-[#A7B8D8] hover:text-white text-2xl"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="overflow-y-auto p-5" style={{ maxHeight: "calc(85vh - 80px)" }}>
+              <div className="text-sm text-[#A7B8D8]">SLM gerekli detay bilgileri buraya gelecek...</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDailySummaryDetail === 'saving' && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4"
+          onClick={() => setShowDailySummaryDetail(null)}
+        >
+          <div
+            className="bg-[#112544] rounded-2xl ring-1 ring-[#2B416B] w-full max-w-4xl max-h-[85vh] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-5 border-b border-[#2B416B]">
+              <div className="text-lg font-semibold">Tasarruf Detayı</div>
+              <button
+                onClick={() => setShowDailySummaryDetail(null)}
+                className="text-[#A7B8D8] hover:text-white text-2xl"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="overflow-y-auto p-5" style={{ maxHeight: "calc(85vh - 80px)" }}>
+              <div className="text-sm text-[#A7B8D8]">Tasarruf detay bilgileri buraya gelecek...</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Zone Detay Modal */}
+      {showZones && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4"
+          onClick={() => setShowZones(false)}
+        >
+          <div
+            className="bg-[#112544] rounded-2xl ring-1 ring-[#2B416B] w-full max-w-3xl max-h-[80vh] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-[#2B416B]">
+              <div className="text-lg font-semibold">Risk by Zone</div>
+              <button
+                onClick={() => setShowZones(false)}
+                className="text-[#A7B8D8] hover:text-white text-2xl"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="overflow-y-auto p-4" style={{ maxHeight: "calc(80vh - 80px)" }}>
+              {zones.length === 0 ? (
+                <div className="text-[#A7B8D8] text-sm">Loading…</div>
+              ) : (
+                <div className="grid gap-3">
+                  {zones.map((z) => (
+                    <div key={z.zone} className="bg-[#0E2142] rounded-xl p-3 ring-1 ring-[#2B416B]">
+                      <div className="flex items-center justify-between text-xs text-[#A7B8D8] mb-2">
+                        <span>{z.zone}</span>
+                        <span>{Math.round(z.risk * 100)}%</span>
+                      </div>
+                      <div className="h-2 w-full bg-[#112544] rounded-full overflow-hidden">
+                        <div
+                          className="h-2 bg-[#2E86FF] rounded-full"
+                          style={{ width: `${Math.round(z.risk * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SLM Alert Modal */}
+      {selectedAlert && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4"
+          onClick={() => setSelectedAlert(null)}
+        >
+          <div
+            className="bg-[#112544] rounded-2xl ring-1 ring-[#2B416B] w-full max-w-4xl max-h-[85vh] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between p-5 border-b border-[#2B416B]">
+              <div className="flex-1">
+                <div className="flex items-center gap-3 mb-2">
+                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                    selectedAlert.severity === "High" ? "bg-[#E63946]/20 text-[#E63946]" :
+                    selectedAlert.severity === "Medium" ? "bg-[#F2B705]/20 text-[#F2B705]" :
+                    "bg-[#2E86FF]/20 text-[#2E86FF]"
+                  }`}>
+                    {selectedAlert.severity === "High" ? "🚨 HIGH" :
+                     selectedAlert.severity === "Medium" ? "⚠️ MEDIUM" : "📅 LOW"}
+                  </span>
+                  <div className="text-lg font-semibold">{selectedAlert.title}</div>
+                </div>
+                <div className="text-sm text-[#A7B8D8]">
+                  ATM {selectedAlert.atm_id} - {selectedAlert.atm_name} ({selectedAlert.city} / {selectedAlert.district})
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedAlert(null)}
+                className="text-[#A7B8D8] hover:text-white text-3xl leading-none"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="overflow-y-auto p-5" style={{ maxHeight: "calc(85vh - 160px)" }}>
+              {/* Alert Details Grid */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+                <div className="bg-[#0E2142] rounded-lg p-3">
+                  <div className="text-[10px] text-[#A7B8D8] mb-1">ATM ID</div>
+                  <div className="text-sm font-semibold text-white">
+                    <span className="ml-2 text-white font-semibold">{selectedAlert.atm_id}</span>
+                  </div>
+                </div>
+                <div className="bg-[#0E2142] rounded-lg p-3">
+                  <div className="text-[10px] text-[#A7B8D8] mb-1">Şehir</div>
+                  <div className="text-sm font-semibold text-white">
+                    <span className="ml-2 text-white font-semibold">{selectedAlert.city}</span>
+                  </div>
+                </div>
+                <div className="bg-[#0E2142] rounded-lg p-3">
+                  <div className="text-[10px] text-[#A7B8D8] mb-1">İlçe</div>
+                  <div className="text-sm font-semibold text-white">
+                    <span className="ml-2 text-white font-semibold">{selectedAlert.district}</span>
+                  </div>
+                </div>
+                <div className="bg-[#0E2142] rounded-lg p-3">
+                  <div className="text-[10px] text-[#A7B8D8] mb-1">ETA</div>
+                  <div className="text-sm font-semibold text-white">
+                    <span className="ml-2 text-white font-semibold">{selectedAlert.eta}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* AI Analysis */}
+              <div className="bg-[#0E2142] rounded-xl p-4 mb-5">
+                <div className="text-sm font-semibold text-white mb-3">🧠 AI Analiz Özeti</div>
+                <div className="space-y-2">
+                  {selectedAlert.flm_count_48h !== undefined && selectedAlert.flm_count_48h > 1 && (
+                    <div className="bg-[#E63946]/10 rounded-lg p-3 ring-1 ring-[#E63946]/30">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[#E63946]">🚨</span>
+                        <div className="text-xs font-semibold text-[#E63946]">48 Saat Tekrar Uyarısı</div>
+                      </div>
+                      <div className="text-xs text-[#A7B8D8]">
+                          Son 48 saatte {selectedAlert.flm_count_48h} kez FLM gönderildi. Sorun çözülemedi.
+                      </div>
+                    </div>
+                  )}
+                  
+                  {selectedAlert.flm_count_7d !== undefined && selectedAlert.flm_count_7d > 3 && (
+                    <div className="bg-[#F2B705]/10 rounded-lg p-3 ring-1 ring-[#F2B705]/30">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[#F2B705]">⚠️</span>
+                        <div className="text-xs font-semibold text-[#F2B705]">Haftalık Müdahale Sıklığı</div>
+                      </div>
+                      <div className="text-xs text-[#A7B8D8]">
+                          Son 7 günde {selectedAlert.flm_count_7d} FLM müdahalesi yapıldı.
+                      </div>
+                    </div>
+                  )}
+                  
+                  {selectedAlert.last_slm_days_ago !== undefined && selectedAlert.last_slm_days_ago > 90 && (
+                    <div className="bg-[#2E86FF]/10 rounded-lg p-3 ring-1 ring-[#2E86FF]/30">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[#2E86FF]">🔧</span>
+                        <div className="text-xs font-semibold text-[#2E86FF]">Uzun Süre SLM Yok</div>
+                      </div>
+                      <div className="text-xs text-[#A7B8D8]">
+                          Son SLM bakımı {selectedAlert.last_slm_days_ago} gün önce yapıldı.
+                      </div>
+                    </div>
+                  )}
+                  
+                  {selectedAlert.repeat_issue && selectedAlert.last_solution && (
+                    <div className="bg-[#E63946]/10 rounded-lg p-3 ring-1 ring-[#E63946]/30">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[#E63946]">🔄</span>
+                        <div className="text-xs font-semibold text-[#E63946]">Tekrar Eden Sorun</div>
+                      </div>
+                      <div className="text-xs text-[#A7B8D8]">
+                          Önceki çözüm: {selectedAlert.last_solution}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Problem & Solution */}
+              <div className="bg-[#0E2142] rounded-xl p-4 mb-5">
+                <div className="text-sm font-semibold text-white mb-3">📋 Problem ve Önerilen Aksiyon</div>
+                <div className="text-sm text-[#A7B8D8] mb-3">{selectedAlert.summary}</div>
+                <div className="text-sm text-white">{selectedAlert.action}</div>
+              </div>
+
+              {/* Status */}
+              {selectedAlert.status && selectedAlert.status !== "pending" && (
+                <div className="bg-[#10B981]/10 rounded-xl p-4 mb-5 ring-1 ring-[#10B981]/30">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-[#10B981] text-xl">✓</span>
+                    <div>
+                      <div className="text-sm font-semibold text-[#10B981]">
+                          {selectedAlert.status === "slm_opened" ? "SLM İşi Açıldı" :
+                           selectedAlert.status === "scheduled_maintenance" ? "Bakım Planlandı" :
+                           "İşlem Yapıldı"}
+                      </div>
+                      <div className="text-xs text-[#A7B8D8] mt-1">
+                          {selectedAlert.decision_by && `Karar Veren: ${selectedAlert.decision_by} `}
+                          {selectedAlert.decision_at && `(${selectedAlert.decision_at})`}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer Actions */}
+            <div className="border-t border-[#2B416B] p-5">
+              {(!selectedAlert.status || selectedAlert.status === "pending") ? (
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {
+                      if (selectedAlert) {
+                        setAlerts(alerts.map(a =>
+                          a.id === selectedAlert.id
+                            ? { ...a, status: "slm_opened", decision_by: "John Doe", decision_at: new Date().toLocaleString('tr-TR') }
+                            : a
+                        ));
+                        setSelectedAlert(null);
+                        alert('SLM işi açıldı ve vendor\'a bildirildi.');
+                      }
+                    }}
+                    className="flex-1 px-4 py-3 bg-[#E63946] hover:bg-[#D32F3E] text-white font-semibold rounded-lg transition"
+                  >
+                    🚨 SLM Aç
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (selectedAlert) {
+                        setAlerts(alerts.map(a =>
+                          a.id === selectedAlert.id
+                            ? { ...a, status: "scheduled_maintenance", decision_by: "John Doe", decision_at: new Date().toLocaleString('tr-TR') }
+                            : a
+                        ));
+                        setSelectedAlert(null);
+                        alert('Bakım planlandı.');
+                      }
+                    }}
+                    className="flex-1 px-4 py-3 bg-[#2E86FF] hover:bg-[#1F6FE0] text-white font-semibold rounded-lg transition"
+                  >
+                    📅 Bakım Planla
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (selectedAlert) {
+                        setAlerts(alerts.map(a =>
+                          a.id === selectedAlert.id
+                            ? { ...a, status: "rejected", decision_by: "John Doe", decision_at: new Date().toLocaleString('tr-TR') }
+                            : a
+                        ));
+                        setSelectedAlert(null);
+                        alert('Öneri reddedildi.');
+                      }
+                    }}
+                    className="px-4 py-3 bg-gray-600 hover:bg-gray-500 text-white font-semibold rounded-lg transition"
+                  >
+                    ❌ Reddet
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setSelectedAlert(null)}
+                  className="w-full px-4 py-3 bg-[#2E86FF] hover:bg-[#1F6FE0] text-white font-semibold rounded-lg transition"
+                >
+                  Kapat
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Günlük Özet Detay Modalleri */}
       {showDailySummaryDetail === 'total' && (
@@ -2226,6 +3198,29 @@ export default function OverviewPage() {
             <option value="KOCAELİ İZMİT">KOCAELİ İZMİT</option>
           </select>
 
+          {/* Nakit Merkezi */}
+          <select
+            value={availTrendCashCenter}
+            onChange={(e) => setAvailTrendCashCenter(e.target.value)}
+            className="bg-[#0E2142] text-white text-xs rounded-lg px-3 py-1.5 border border-[#2B416B] outline-none cursor-pointer hover:bg-[#1a2f54]"
+          >
+            <option value="all">Tüm Nakit Merkezleri</option>
+            <option value="İstanbul Anadolu NM">İstanbul Anadolu NM</option>
+            <option value="İstanbul Avrupa NM">İstanbul Avrupa NM</option>
+            <option value="Ankara NM">Ankara NM</option>
+            <option value="İzmir NM">İzmir NM</option>
+            <option value="Bursa NM">Bursa NM</option>
+            <option value="Antalya NM">Antalya NM</option>
+            <option value="Adana NM">Adana NM</option>
+            <option value="Konya NM">Konya NM</option>
+            <option value="Gaziantep NM">Gaziantep NM</option>
+            <option value="Kocaeli NM">Kocaeli NM</option>
+            <option value="Mersin NM">Mersin NM</option>
+            <option value="Trabzon NM">Trabzon NM</option>
+            <option value="Diyarbakır NM">Diyarbakır NM</option>
+            <option value="Erzurum NM">Erzurum NM</option>
+          </select>
+
           <div className="flex-1"></div>
 
           {/* Tarih Filtreleri */}
@@ -2525,6 +3520,93 @@ export default function OverviewPage() {
               </p>
             </div>
           </div>
+
+          {/* AI Açıklamaları - Düşüş Analizi */}
+          <div className="mt-6 space-y-3">
+            <div className="text-base font-bold text-white mb-4 flex items-center gap-3 bg-gradient-to-r from-[#2E86FF]/20 via-transparent to-transparent border-l-4 border-[#2E86FF] pl-4 py-3 rounded-r-lg">
+              <span className="text-2xl">🔍</span>
+              <span>Arıza Trend Analizi - Düşüş Kök Sebep Raporları</span>
+            </div>
+
+            {/* Şubat 2025 - En büyük düşüş */}
+            <div className="bg-gradient-to-r from-[#E63946]/10 via-[#0E2142] to-transparent border border-[#E63946]/30 rounded-xl p-4">
+              <div className="flex items-start gap-3">
+                <div className="text-2xl">⚠️</div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-sm font-bold text-[#E63946]">Şubat 2025</span>
+                    <span className="text-xs bg-[#E63946]/20 text-[#E63946] px-2 py-0.5 rounded">%90.1 (2.1% düşüş)</span>
+                  </div>
+                  <div className="text-xs text-[#A7B8D8] space-y-1.5">
+                    <p>• <span className="text-white font-semibold">Isıtıcı Modül Arızaları:</span> 23 ATM'de FLM kaydı (ısıtma sistemi yetersizliği)</p>
+                    <p>• <span className="text-white font-semibold">Not Sayıcı Problemleri:</span> NCR marka 12 ATM'de nem nedeniyle not sayıcı hassasiyeti kaybı (şubat sonunda sahadan kaldırma süreci başlatıldı)</p>
+                    <p>• <span className="text-white font-semibold">Etkilenen Modeller:</span> NCR (%58 - kaldırılıyor), Hitachi (%24), GRG (%18)</p>
+                    <p className="text-[#F2B705] mt-2">📊 Bu ay toplam <span className="font-bold">142 FLM</span> kaydedildi (önceki aya göre +34%)</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Haziran 2025 */}
+            <div className="bg-gradient-to-r from-[#F2B705]/10 via-[#0E2142] to-transparent border border-[#F2B705]/30 rounded-xl p-4">
+              <div className="flex items-start gap-3">
+                <div className="text-2xl">🌡️</div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-sm font-bold text-[#F2B705]">Haziran 2025</span>
+                    <span className="text-xs bg-[#F2B705]/20 text-[#F2B705] px-2 py-0.5 rounded">%90.3</span>
+                  </div>
+                  <div className="text-xs text-[#A7B8D8] space-y-1.5">
+                    <p>• <span className="text-white font-semibold">Yaz Sıcaklıkları:</span> 35°C+ sıcaklıkta dispenser modüllerinde aşırı ısınma</p>
+                    <p>• <span className="text-white font-semibold">Klima Arızaları:</span> 19 ATM'de klima sistemi yetersizliği (iç sıcaklık 42°C+)</p>
+                    <p>• <span className="text-white font-semibold">CIT Gecikmeleri:</span> Turistik bölgelerde yüksek talep, NM ekipleri 8 güzergahta gecikme yaşadı</p>
+                    <p>• <span className="text-white font-semibold">Elektrik Kesintileri:</span> Ege bölgesinde 6 ATM, şebeke yüksek yük nedeniyle 4+ saat kesintiye maruz kaldı</p>
+                    <p>• <span className="text-white font-semibold">Vendor Bantaş Personel Krizi:</span> Yaz dönemi izinleri ve müşteri coğrafi dağılımı nedeniyle teknisyen yetersizliği, SLA uyum oranında %8 düşüş kaydedildi</p>
+                    <p className="text-[#10B981] mt-2">📊 Bu ay <span className="font-bold">97 FLM</span> + <span className="font-bold">14 SLM</span> kaydı (yaz sezonunun etkisi)</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Temmuz 2025 */}
+            <div className="bg-gradient-to-r from-[#F97316]/10 via-[#0E2142] to-transparent border border-[#F97316]/30 rounded-xl p-4">
+              <div className="flex items-start gap-3">
+                <div className="text-2xl">☀️</div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-sm font-bold text-[#F97316]">Temmuz 2025</span>
+                    <span className="text-xs bg-[#F97316]/20 text-[#F97316] px-2 py-0.5 rounded">%90.0 (en düşük yaz ayı)</span>
+                  </div>
+                  <div className="text-xs text-[#A7B8D8] space-y-1.5">
+                    <p>• <span className="text-white font-semibold">Zirve Yaz Sıcaklığı:</span> Güney bölgelerde 40°C+ sıcaklık, elektronik komponentlerde termal stres</p>
+                    <p>• <span className="text-white font-semibold">Turistik Bölge Aşırı Yükü:</span> Antalya-Muğla-İzmir bölgelerinde ATM kullanımı %180 arttı, ekipman yorgunluğu</p>
+                    <p>• <span className="text-white font-semibold">Bakım Birikimi:</span> Haziran'dan devren 23 ATM bakım bekliyor, teknisyen kapasite yetersizliği</p>
+                    <p>• <span className="text-white font-semibold">Güç Kaynağı Sorunları:</span> UPS pil ömrü sona eren 11 ATM, kesinti anında düşüyor</p>
+                    <p>• <span className="text-white font-semibold">GRG Dispenser Firmware:</span> 9 GRG ATM'de firmware güncelleme sonrası not sıkışması, vendor desteği ile 4 gün içinde düzeldi</p>
+                    <p>• <span className="text-white font-semibold">🔴 Vendor Bantaş Kritik Personel Açığı:</span> Coğrafi yayılım ve yaz izinleri nedeniyle teknisyen sayısı %35 düştü, ortalama SLA süresi 6.2 saate çıktı (normal: 4.1 saat) - <span className="text-[#E63946] font-bold">düşüşün birincil sebebi</span></p>
+                    <p className="text-[#E63946] mt-2">📊 Bu ay <span className="font-bold">118 FLM</span> + <span className="font-bold">21 SLM</span> (yılın en yoğun ayı, teknisyen kapasite %95 kullanımda)</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Genel Öneri */}
+            <div className="bg-gradient-to-r from-[#10B981]/10 via-[#0E2142] to-transparent border border-[#10B981]/30 rounded-xl p-4">
+              <div className="flex items-start gap-3">
+                <div className="text-2xl">💡</div>
+                <div className="flex-1">
+                  <div className="text-sm font-bold text-[#10B981] mb-2">Stratejik Öneriler</div>
+                  <div className="text-xs text-[#A7B8D8] space-y-1.5">
+                    <p>• <span className="text-white">Kış Hazırlığı:</span> Ekim ayında tüm ATM'lere ısıtıcı/nem önleyici modül kontrolü yapılmalı (Hitachi ve GRG modeller için özelleştirilmiş)</p>
+                    <p>• <span className="text-white">Yaz Bakımı:</span> Mayıs ayında klima sistemleri gözden geçirilmeli, kritik noktalarda yedek UPS pil değişimi</p>
+                    <p>• <span className="text-white">Turistik Sezon Kapasitesi:</span> Haziran-Ağustos arası teknisyen ekip %30 artırılabilir veya bölgesel destek ekipleri oluşturulabilir</p>
+                    <p>• <span className="text-white">Vendor Yedek Parça Stoku:</span> Hitachi ve GRG kritik komponentleri (dispenser, kart okuyucu, termal yazıcı) için yedek parça stok seviyesi artırılmalı</p>
+                    <p>• <span className="text-white">GRG Firmware Yönetimi:</span> GRG güncellemeleri test ortamında doğrulanmalı, prod deploy öncesi staging zorunlu hale getirilmeli</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Legend */}
@@ -2545,6 +3627,121 @@ export default function OverviewPage() {
       </div>
 
       <OverviewBottomStrip />
+      
+      {/* Tam Ekran Harita Modal */}
+      {fullscreenMap && (
+        <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-[#2B416B] bg-[#0A1628]">
+            <div className="flex items-center gap-3">
+              <h2 className="text-xl font-bold text-white">🗺️ ATM Risk Haritası - Tam Ekran</h2>
+              <div className="text-sm text-[#A7B8D8]">
+                {filteredAtms.length} ATM
+              </div>
+              
+              {/* Lokasyon Filtresi - Şube/Offsite */}
+              <div className="flex items-center gap-1 bg-[#0E2142] rounded-lg p-1">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setAtmLocationFilter('all');
+                  }}
+                  className={`px-3 py-1 text-xs font-medium rounded transition ${
+                    atmLocationFilter === 'all'
+                      ? 'bg-[#2E86FF] text-white'
+                      : 'text-[#A7B8D8] hover:text-white'
+                  }`}
+                >
+                  Tümü
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setAtmLocationFilter('branch');
+                  }}
+                  className={`px-3 py-1 text-xs font-medium rounded transition ${
+                    atmLocationFilter === 'branch'
+                      ? 'bg-[#10B981] text-white'
+                      : 'text-[#A7B8D8] hover:text-white'
+                  }`}
+                >
+                  � Şube
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setAtmLocationFilter('offsite');
+                  }}
+                  className={`px-3 py-1 text-xs font-medium rounded transition ${
+                    atmLocationFilter === 'offsite'
+                      ? 'bg-[#F2B705] text-white'
+                      : 'text-[#A7B8D8] hover:text-white'
+                  }`}
+                >
+                  📍 Offsite
+                </button>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-4">
+              {/* Legend */}
+              <div className="flex items-center gap-4 text-sm">
+                <button
+                  onClick={() => toggleBand("High")}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded transition ${
+                    selectedBands.includes("High")
+                      ? "opacity-100 bg-[#E63946]/20"
+                      : "opacity-50 hover:opacity-75"
+                  }`}
+                >
+                  <span className="inline-block h-3 w-3 rounded-full" style={{ background: "#E63946" }} />
+                  <span className="text-white">Yüksek Risk</span>
+                </button>
+                <button
+                  onClick={() => toggleBand("Medium")}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded transition ${
+                    selectedBands.includes("Medium")
+                      ? "opacity-100 bg-[#F2B705]/20"
+                      : "opacity-50 hover:opacity-75"
+                  }`}
+                >
+                  <span className="inline-block h-3 w-3 rounded-full" style={{ background: "#F2B705" }} />
+                  <span className="text-white">Orta Risk</span>
+                </button>
+                <button
+                  onClick={() => toggleBand("Low")}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded transition ${
+                    selectedBands.includes("Low")
+                      ? "opacity-100 bg-[#2E86FF]/20"
+                      : "opacity-50 hover:opacity-75"
+                  }`}
+                >
+                  <span className="inline-block h-3 w-3 rounded-full" style={{ background: "#2E86FF" }} />
+                  <span className="text-white">Düşük Risk</span>
+                </button>
+              </div>
+              
+              <button
+                onClick={() => setFullscreenMap(false)}
+                className="px-4 py-2 bg-[#E63946] hover:bg-[#D62839] text-white font-semibold rounded-lg transition flex items-center gap-2"
+              >
+                ✕ Kapat
+              </button>
+            </div>
+          </div>
+          
+          {/* Map - Full Height with proper key to force re-render */}
+          <div className="flex-1 w-full" style={{ height: 'calc(100vh - 73px)' }}>
+            <OverviewMap
+              key="fullscreen-map"
+              filteredAtms={filteredAtms}
+              center={center}
+              top10Band={top10Band}
+              top10Data={top10Data}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

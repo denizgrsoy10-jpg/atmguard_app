@@ -1,0 +1,8 @@
+{
+  "model_name": "prophet_predictor",
+  "version": "v1.0.0",
+  "saved_at": "2026-02-10T20:08:38.017774",
+  "model_path": "models/prophet_predictor/v1.0.0/model.pkl",
+  "model_size_mb": 2.3,
+  "accuracy": 0.94
+}

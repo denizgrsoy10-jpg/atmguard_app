@@ -12,10 +12,10 @@ export default function Tabs() {
 
   const tabs = [
     { href: "/overview", label: t.nav.overview },
-    { href: "/trend-health", label: t.nav.trendHealth },
     { href: "/cashflow-ops", label: t.nav.cashflow },
     { href: "/command-center", label: t.nav.commandCenter },
     { href: "/budget-performance", label: "💰 Bütçe & Tasarruf" },
+    { href: "/trend-health", label: t.nav.trendHealth },
   ];
 
   return (

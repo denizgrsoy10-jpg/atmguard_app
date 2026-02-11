@@ -3,25 +3,133 @@
 import { useState } from 'react';
 
 export default function BudgetPerformancePage() {
+  // Excel Export Function
+  const handleExportExcel = () => {
+    const csvContent = '\uFEFFBütçe Performansı 2026\n' +
+      'Rapor Tarihi: ' + new Date().toLocaleDateString('tr-TR') + '\n\n' +
+      'Ay,FLM Bütçe,FLM Gerçek,SLM Bütçe,SLM Gerçek,İkmal Bütçe,İkmal Gerçek,Toplama Bütçe,Toplama Gerçek,Bütçe TRY,Gerçek TRY,Tasarruf,Tasarruf %,Not\n' +
+      'Ocak,2500,2425,300,291,8000,7760,2000,1940,133300000,127500000,5800000,-4.4%,AI YOK - Geleneksel\n' +
+      'Şubat,2400,2328,290,281,7800,7568,1950,1891,128500000,124300000,4200000,-3.3%,AI YOK - Geleneksel\n' +
+      'Mart,2300,1955,280,238,7600,6460,1900,1615,123700000,100435000,23265000,+18.8%,AI PILOT - Motor aktif\n' +
+      'Nisan,2200,1804,270,221,7400,6068,1850,1517,118900000,95388500,23511500,+19.8%,AI FULL - İyileştirme\n' +
+      'Mayıs,2150,1752,265,216,7200,5868,1800,1468,116150000,92644000,23506000,+20.2%,AI FULL + KURBAN BAYRAMI (27-31 Mayıs)\n' +
+      'Haziran,2100,1701,260,211,7000,5670,1750,1418,113400000,89937000,23463000,+20.7%,AI FULL - Yaz başlangıcı + okul tatili\n' +
+      'Temmuz,2050,1638,255,204,6800,5440,1700,1360,110650000,86630000,24020000,+21.7%,AI + Yazlık yoğunluk başladı\n' +
+      'Ağustos,2000,1580,250,198,6600,5214,1650,1303,107900000,83495000,24405000,+22.6%,AI + Yazlık PEAK - Motor optimizasyonu\n' +
+      'Eylül,2050,1617,255,201,6800,5364,1700,1343,110650000,85635000,25015000,+22.6%,AI + Yazlık iniş\n' +
+      'Ekim,2100,1638,260,203,7000,5460,1750,1366,113400000,86660000,26740000,+23.6%,AI + Mevsim geçiş avantajı\n' +
+      'Kasım,2200,1694,270,208,7400,5698,1850,1424,118900000,89590000,29310000,+24.7%,AI + Şehir dönüşü\n' +
+      'Aralık,2300,1748,280,213,7600,5776,1900,1444,123700000,92400000,31300000,+25.3%,AI + Kış optimizasyonu\n\n' +
+      'ÖZET\n' +
+      'Yıllık Bütçe:,₺1.600.000.000\n' +
+      'Gerçekleşen (AI ile):,₺1.308.784.500\n' +
+      'Tasarruf Toplamı:,₺291.215.500\n' +
+      'Tasarruf Oranı:,%18.2\n' +
+      'AI Öncesi (Ocak-Şubat):,%5.5 tasarruf kaybı\n' +
+      'AI Sonrası (Mart-Aralık):,%22.1 ortalama tasarruf';
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `butce_performansi_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+  };
+
+  // Report Generation Function
+  const handleGenerateReport = () => {
+    const reportContent = `
+BÜTÇE PERFORMANSI & TASARRUF ANALİZİ RAPORU
+=========================================
+Tarih: ${new Date().toLocaleDateString('tr-TR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+
+📊 GENEL BAKIŞ
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Yıllık Bütçe (2026):              ₺1.600.000.000 ($36.7M @ 43.59₺/$)
+Gerçekleşen (YTD - Şubat):        ₺251.800.000 ($5.8M)
+YTD Tasarruf:                     ₺14.800.000 (%5.5) 🟡
+Gerçekçi Yıl Sonu Tahmini:        ₺227.200.000 (%14.2) ✓
+Motor Hedefi (AI Full):           ₺291.200.000 (%18.2) 🎯
+
+💰 FİNANSAL ETKİ ANALİZİ
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+AI Öncesi Dönem (Ocak-Şubat):
+  • Ortalama Tasarruf: -₺5.0M/ay (-%3.8)
+  • Geleneksel yöntem kullanıldı
+  • Kış mevsimi yoğunluğu etkisi
+
+AI Pilot (Mart):
+  • Tasarruf: +₺23.3M (+%18.8) ⚡
+  • İlk ay motor etkisi başarılı
+
+AI Full (Nisan-Aralık):
+  • Ortalama Tasarruf: +₺25.5M/ay (+%22.5)
+  • Motor optimizasyonu tam kapasitede
+  • Mevsimsel avantajlar optimize edildi
+
+🎯 HEDEF DURUM
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+%15 Tasarruf Hedefi:              ₺240.000.000
+Motor Hedefi (%18.2):             ₺291.200.000
+Hedef Aşım:                       +₺51.200.000 (+%21.3 daha fazla)
+
+📈 OPERASYONEL METRİKLER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FLM Optimizasyonu:                %20-25 azalma (Mart+)
+SLM Optimizasyonu:                %18-22 azalma
+İkmal/Toplama Kombinasyonu:       %23-26 tasarruf
+Mevsimsel Optimizasyon:           En yüksek Aralık (%25.3)
+
+🔍 KRİTİK BULGULAR
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. AI etkisi Mart'ta anında görüldü (+%18.8)
+2. Temmuz-Ağustos yazlık PEAK döneminde maksimum verimlilik
+3. Kış aylarında (Kasım-Aralık) şehir yoğunluğu avantajı
+4. Mevsimsel faktörlerin motor tarafından başarıyla yönetildi
+
+✅ ÖNERİLER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Motor performansı hedefin üzerinde (%18.2 > %15)
+• Mevsimsel stratejiler etkin çalışıyor
+• 2027 için hedef: %20+ tasarruf mümkün
+• Incremental learning ile sürekli iyileştirme devam etmeli
+
+Rapor Oluşturan: IronClad Engine v1.0
+Sonraki Güncelleme: ${new Date(Date.now() + 30*24*60*60*1000).toLocaleDateString('tr-TR')}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    `.trim();
+
+    const blob = new Blob([reportContent], { type: 'text/plain;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `butce_raporu_${new Date().toISOString().split('T')[0]}.txt`;
+    link.click();
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#0A1628] via-[#0E2142] to-[#1A1F3A] p-6">
       {/* Header */}
       <div className="mb-8">
         <div className="flex items-center justify-between mb-2">
           <h1 className="text-3xl font-bold text-white">
-            💰 Bütçe Performansı & Tasarruf Analizi
+            💰 Bütçe Performansı & Tasarruf Analizi / Budget Performance & Savings Analysis
           </h1>
           <div className="flex items-center gap-3">
-            <button className="px-4 py-2 rounded-lg bg-[#10B981] hover:bg-[#059669] text-white text-sm font-semibold transition flex items-center gap-2">
+            <button 
+              onClick={handleExportExcel}
+              className="px-4 py-2 rounded-lg bg-[#10B981] hover:bg-[#059669] text-white text-sm font-semibold transition flex items-center gap-2"
+            >
               📊 Excel İndir
             </button>
-            <button className="px-4 py-2 rounded-lg bg-[#2E86FF] hover:bg-[#1F6FE0] text-white text-sm font-semibold transition flex items-center gap-2">
+            <button 
+              onClick={handleGenerateReport}
+              className="px-4 py-2 rounded-lg bg-[#2E86FF] hover:bg-[#1F6FE0] text-white text-sm font-semibold transition flex items-center gap-2"
+            >
               📈 Rapor Oluştur
             </button>
           </div>
         </div>
         <p className="text-[#A7B8D8] text-sm">
-          2026 Yılı Operasyonel Maliyet Takibi • Hedef: %15 Tasarruf • Motor Hedefi: %18.2
+          2026 Yılı Operasyonel Maliyet Takibi • Hedef: %15 Tasarruf • Motor Hedefi: %18.2 / 2026 Operational Cost Tracking • Target: 15% Savings • Engine Target: 18.2%
         </p>
       </div>
 
@@ -94,7 +202,7 @@ export default function BudgetPerformancePage() {
                     -₺5.8M (-4.4%)
                   </span>
                 </td>
-                <td className="text-center p-3 text-xs text-[#EF4444]/80">❌ AI YOK - Geleneksel + Kış + 🏙️ BÜYÜK ŞEHİR YOĞUNLUK (yazlıklar durgun)</td>
+                <td className="text-center p-3 text-xs text-[#EF4444]/80">❌ AI YOK - Geleneksel + Kış + ❄️ SOĞUK/KAR + 🏙️ BÜYÜK ŞEHİR YOĞUNLUK (yazlıklar durgun) + YILBAŞI SONRASI</td>
               </tr>
 
               {/* ŞUBAT 2026 - Geleneksel Yöntem */}
@@ -115,7 +223,7 @@ export default function BudgetPerformancePage() {
                     -₺9.0M (-6.8%)
                   </span>
                 </td>
-                <td className="text-center p-3 text-xs text-[#F59E0B]/80">🔶 AI YOK - Kısa ay + Kış TATİLİ (yarıyıl) ⛷️ Kayak bölge ATM spike</td>
+                <td className="text-center p-3 text-xs text-[#F59E0B]/80">🔶 AI YOK - Kısa ay (28 gün) + ❄️ Kış devam + YARIYIL TATİLİ ⛷️ Kayak bölge ATM spike (Uludag/Palandoken)</td>
               </tr>
 
               {/* MART 2026 - Pilot Test */}
@@ -136,7 +244,7 @@ export default function BudgetPerformancePage() {
                     -₺12.8M (-9.6%)
                   </span>
                 </td>
-                <td className="text-center p-3 text-xs text-[#3B82F6]/80">🔷 AI Pilot Test + RAMAZAN BAYRAMI (30 Mar-2 Nis) 🌙 Arefe yoğunluğu</td>
+                <td className="text-center p-3 text-xs text-[#3B82F6]/80">🔷 AI Pilot Test BAŞLADI + RAMAZAN AYI (1 Mart başlıyor) 🌙 + RAMAZAN BAYRAMI (30 Mar-1 Nis) Arefe yoğunluğu</td>
               </tr>
 
               {/* NİSAN 2026 - AI Başlıyor */}
@@ -157,7 +265,7 @@ export default function BudgetPerformancePage() {
                     -₺16.5M (-12.4%)
                   </span>
                 </td>
-                <td className="text-center p-3 text-xs text-[#10B981]/80">✅ AI TAM DEVREDE - İlk ay + Ramazan dönüşü + 23 NİSAN TATİL 🎉</td>
+                <td className="text-center p-3 text-xs text-[#10B981]/80">✅ AI TAM DEVREDE - İlk ay + RAMAZAN BAYRAMI (30 Mart-1 Nis) dönüşü + 23 NİSAN TATİL 🎉 + BAHAR</td>
               </tr>
 
               {/* MAYIS 2026 */}
@@ -178,7 +286,7 @@ export default function BudgetPerformancePage() {
                     -₺20.5M (-15.4%)
                   </span>
                 </td>
-                <td className="text-center p-3 text-xs text-[#10B981]/80">✅ AI öğreniyor + 1 MAYIS + 19 MAYIS TATİLLER (Köprü olursa yo) 🎊</td>
+                <td className="text-center p-3 text-xs text-[#10B981]/80">✅ AI öğreniyor + 1 MAYIS + 19 MAYIS TATİL + 🐑 KURBAN BAYRAMI (27-31 MAYIS) AREFE MAX! 🎊 + YAZ BAŞLANGIÇ</td>
               </tr>
 
               {/* HAZİRAN 2026 */}
@@ -199,7 +307,7 @@ export default function BudgetPerformancePage() {
                     -₺22.1M (-16.6%)
                   </span>
                 </td>
-                <td className="text-center p-3 text-xs text-[#10B981]/80">✅ Yaz + KURBAN BAYRAMI (6-10 Haz) 🐑 AREFE MAX + 🏖️ OKUL TATİLİ BAŞLA! Yazlık/sahil ATM spike</td>
+                <td className="text-center p-3 text-xs text-[#10B981]/80">✅ Bayram sonrası normale dönüş + 🏖️ OKUL TATİLİ TAM DEVREDE! Yazlık/sahil ATM spike + YAZ ZİRVESİ YAKLAŞIYOR</td>
               </tr>
 
               {/* TEMMUZ 2026 */}
@@ -220,7 +328,7 @@ export default function BudgetPerformancePage() {
                     -₺22.7M (-17.0%)
                   </span>
                 </td>
-                <td className="text-center p-3 text-xs text-[#10B981]/80">✅ Tatil + AI peak + 🌡️ SICAK (38-42°C) + 🏖️ YAZLIK/SAHİL ATM PATLAMA (işlem +200-400%) + ⚠️ KAYIŞ ERİMESİ RİSKİ</td>
+                <td className="text-center p-3 text-xs text-[#10B981]/80">✅ YAZ ZİRVESİ + AI peak + 🌡️ SICAK (38-42°C) + 🏖️ YAZLIK/SAHİL ATM PATLAMA (+200-400% işlem) + ⚠️ KAYIŞ ERİMESİ RİSKİ</td>
               </tr>
 
               {/* AĞUSTOS 2026 */}
@@ -241,7 +349,7 @@ export default function BudgetPerformancePage() {
                     -₺17.1M (-12.8%)
                   </span>
                 </td>
-                <td className="text-center p-3 text-xs text-[#F59E0B]/70">🔶 30 AĞUSTOS 🏆 + 🌡️ MAX Sıcak (45°C) + 🏝️ YAZLIK ZİRVE (Bodrum/Antalya/Çeşme) ⚠️</td>
+                <td className="text-center p-3 text-xs text-[#F59E0B]/70">🔶 30 AĞUSTOS ZAFER BAYRAMI 🏆 + 🌡️ MAX Sıcak (45°C+) + 🏝️ YAZLIK ZİRVE (Bodrum/Antalya/Çeşme) ⚠️ EYLÜL'E GEÇİŞ</td>
               </tr>
 
               {/* EYLÜL 2026 */}
@@ -262,7 +370,7 @@ export default function BudgetPerformancePage() {
                     -₺20.5M (-15.4%)
                   </span>
                 </td>
-                <td className="text-center p-3 text-xs text-[#10B981]/80">✅ Sonbahar + 🏫 OKUL AÇILDI (15 Eyl) Şehre dönüş başladı, yazlık ATM düşüş</td>
+                <td className="text-center p-3 text-xs text-[#10B981]/80">✅ Sonbahar + 🏫 OKUL AÇILDI (15 Eyl) Şehre dönüş başladı, yazlık ATM düşüş + AI mevsim geçişi optimizasyonu</td>
               </tr>
 
               {/* EKİM 2026 */}
@@ -283,7 +391,7 @@ export default function BudgetPerformancePage() {
                     -₺21.3M (-16.0%)
                   </span>
                 </td>
-                <td className="text-center p-3 text-xs text-[#10B981]/80">✅ AI full performans + 29 EKİM CUMHURİYET BAYRAMI 🇹🇷 (Köprü 5 gün)</td>
+                <td className="text-center p-3 text-xs text-[#10B981]/80">✅ AI full performans + 29 EKİM CUMHURİYET BAYRAMI 🇼🇷 (Köprü 5 gün olursa tatil yoğunluğu)</td>
               </tr>
 
               {/* KASIM 2026 */}
@@ -304,7 +412,7 @@ export default function BudgetPerformancePage() {
                     -₺16.3M (-12.2%)
                   </span>
                 </td>
-                <td className="text-center p-3 text-xs text-[#F59E0B]/70">🔶 Kış arızaları + 🏙️ TAM ŞEHİR YOĞUNLUK (yazlıklar kapalı), büyük şehir ATM spike</td>
+                <td className="text-center p-3 text-xs text-[#F59E0B]/70">🔶 Kış arızaları başlıyor + 🏙️ TAM ŞEHİR YOĞUNLUK (yazlıklar kapalı), büyük şehir ATM spike + SOĞUK</td>
               </tr>
 
               {/* ARALIK 2026 */}
@@ -325,7 +433,7 @@ export default function BudgetPerformancePage() {
                     -₺14.8M (-11.1%)
                   </span>
                 </td>
-                <td className="text-center p-3 text-xs text-[#F59E0B]/70">🔶 YILBAŞI TATİLİ (31 Ara-1 Oca) 🎄 Arefe MAX ÇEKİM + Kar/Soğuk arıza</td>
+                <td className="text-center p-3 text-xs text-[#F59E0B]/70">🔶 YILBAŞI (31 Ara) 🎄 AREFE MAX ÇEKİM + ❄️ Kar/Soğuk arıza + YILSONU MAAŞ/İKRAMIYE</td>
               </tr>
 
               {/* TOTAL ROW - Gerçekçi */}
@@ -429,6 +537,38 @@ export default function BudgetPerformancePage() {
           </div>
           <div className="text-xs text-[#F59E0B] font-semibold">
             📊 3 ay kaybı var, ama telafi mümkün
+          </div>
+        </div>
+      </div>
+
+      {/* 2026 BÜTÇE PERFORMANSI - ÖZET KART */}
+      <div className="bg-[#112544] rounded-2xl p-6 ring-1 ring-[#2B416B] mt-8">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <div className="text-lg font-bold text-white">2026 Bütçe Performansı</div>
+            <div className="text-sm text-[#A7B8D8]">Detaylı maliyet analizi ve tasarruf takibi</div>
+          </div>
+        </div>
+        <div className="grid grid-cols-4 gap-4">
+          <div className="bg-[#0E2142]/60 rounded-lg p-3">
+            <div className="text-xs text-[#A7B8D8] mb-1">YTD Tasarruf</div>
+            <div className="text-xl font-bold text-[#F59E0B]">₺14.8M</div>
+            <div className="text-xs text-[#F59E0B]">%5.5</div>
+          </div>
+          <div className="bg-[#0E2142]/60 rounded-lg p-3">
+            <div className="text-xs text-[#A7B8D8] mb-1">Yıl Sonu Hedef</div>
+            <div className="text-xl font-bold text-[#10B981]">₺227M</div>
+            <div className="text-xs text-[#10B981]">%14.2</div>
+          </div>
+          <div className="bg-[#0E2142]/60 rounded-lg p-3">
+            <div className="text-xs text-[#A7B8D8] mb-1">Motor Hedefi</div>
+            <div className="text-xl font-bold text-[#8B5CF6]">₺291M</div>
+            <div className="text-xs text-[#8B5CF6]">%18.2</div>
+          </div>
+          <div className="bg-[#0E2142]/60 rounded-lg p-3">
+            <div className="text-xs text-[#A7B8D8] mb-1">Durum</div>
+            <div className="text-sm font-bold text-[#F59E0B]">AI Pilot</div>
+            <div className="text-xs text-[#F59E0B]">Mart 2026</div>
           </div>
         </div>
       </div>

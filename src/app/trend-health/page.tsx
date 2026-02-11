@@ -311,7 +311,7 @@ export default function TrendHealthPage() {
 
       {/* Motor Performans Metrikleri */}
       <div className="bg-[#112544] rounded-2xl p-4 ring-1 ring-[#2B416B]">
-        <div className="text-sm font-semibold mb-4">Motor Performans Metrikleri</div>
+        <div className="text-sm font-semibold mb-4">⚙️ Motor Performans Metrikleri / AI Engine Performance Metrics</div>
         <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-4">
           <div className="bg-[#0E2142] rounded-xl p-3 ring-1 ring-[#2B416B] relative group">
             <button

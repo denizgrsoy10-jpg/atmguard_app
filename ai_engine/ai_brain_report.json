@@ -1,0 +1,19 @@
+{
+  "date": "2026-02-10",
+  "total_atms": 2771,
+  "total_refreshes": 10776,
+  "total_cost": 1616.4,
+  "baseline_cost": 9975.6,
+  "savings": 8359.2,
+  "savings_percent": 83.8,
+  "avg_refreshes_per_atm": 3.9,
+  "cost_per_atm": 0.58,
+  "priority_breakdown": {
+    "CRITICAL": 1581.5999999999428,
+    "MEDIUM": 1.7999999999999996,
+    "MINIMAL": 0.0,
+    "HIGH": 33.00000000000004
+  },
+  "decisions_made": 5,
+  "target_achieved": true
+}
