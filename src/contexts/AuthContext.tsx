@@ -36,9 +36,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Mock users database (production: replace with real API)
 // Password: PC login password (AD password)
+// SECURITY: Passwords now read from environment variables
 const MOCK_USERS: Record<string, { password: string; user: User }> = {
   'T20111': {
-    password: 'Qnb2024!',
+    password: process.env.NEXT_PUBLIC_DEMO_ADMIN_PASSWORD || 'CHANGE_ME',
     user: {
       id: 'USR001',
       name: 'Deniz Gürsoy',
@@ -57,7 +58,7 @@ const MOCK_USERS: Record<string, { password: string; user: User }> = {
     },
   },
   'T20112': {
-    password: 'Manager2024!',
+    password: process.env.NEXT_PUBLIC_DEMO_MANAGER_PASSWORD || 'CHANGE_ME',
     user: {
       id: 'USR002',
       name: 'Ayşe Demir',
@@ -77,7 +78,7 @@ const MOCK_USERS: Record<string, { password: string; user: User }> = {
     },
   },
   'T20113': {
-    password: 'Operator2024!',
+    password: process.env.NEXT_PUBLIC_DEMO_OPERATOR_PASSWORD || 'CHANGE_ME',
     user: {
       id: 'USR003',
       name: 'Mehmet Kaya',
@@ -97,7 +98,7 @@ const MOCK_USERS: Record<string, { password: string; user: User }> = {
     },
   },
   'T20114': {
-    password: 'Viewer2024!',
+    password: process.env.NEXT_PUBLIC_DEMO_VIEWER_PASSWORD || 'CHANGE_ME',
     user: {
       id: 'USR004',
       name: 'Fatma Şahin',

@@ -27,9 +27,10 @@ export default function SimpleLoginPage() {
 
   const handleDemoLogin = (demoSicil: string) => {
     setSicil(demoSicil);
-    setPassword('Qnb2024!');
+    const demoPassword = process.env.NEXT_PUBLIC_DEMO_ADMIN_PASSWORD || '';
+    setPassword(demoPassword);
     setTimeout(() => {
-      login(demoSicil, 'Qnb2024!');
+      login(demoSicil, demoPassword);
     }, 100);
   };
 
@@ -42,7 +43,7 @@ export default function SimpleLoginPage() {
             <div className="relative">
               <Image
                 src="/qnb-logo.png"
-                alt="QNB Finansbank"
+                alt="QNB Bank"
                 width={80}
                 height={80}
                 className="rounded-2xl shadow-2xl"
@@ -134,7 +135,7 @@ export default function SimpleLoginPage() {
 
         {/* Footer */}
         <p className="text-center text-xs text-[#A7B8D8] mt-6">
-          © 2026 QNB Finansbank - Tüm hakları saklıdır
+          © 2026 QNB Bank - Tüm hakları saklıdır
         </p>
       </div>
     </div>

@@ -52,7 +52,7 @@ Azure ML:       89% accuracy     (2-4% behind)
 Deutsche Bank:  88% accuracy     (3-5% behind)
 AWS Forecast:   85-87% accuracy  (4-8% behind)
 Google Cloud:   84-86% accuracy  (5-9% behind)
-```
+📊 Operasyonel Özet```
 
 ### Cash Forecasting (Regression)
 ```

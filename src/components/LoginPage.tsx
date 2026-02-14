@@ -24,11 +24,12 @@ export default function LoginPage() {
     }
   };
 
+  // SECURITY: Demo accounts - passwords read from .env.local
   const demoAccounts = [
-    { sicil: 'T20111', password: 'Qnb2024!', name: 'Deniz Gürsoy', role: 'Admin', desc: 'Full access' },
-    { sicil: 'T20112', password: 'Manager2024!', name: 'Ayşe Demir', role: 'Manager', desc: 'Regional management' },
-    { sicil: 'T20113', password: 'Operator2024!', name: 'Mehmet Kaya', role: 'Operator', desc: 'Operations only' },
-    { sicil: 'T20114', password: 'Viewer2024!', name: 'Fatma Şahin', role: 'Viewer', desc: 'Read-only' },
+    { sicil: 'T20111', password: process.env.NEXT_PUBLIC_DEMO_ADMIN_PASSWORD || '', name: 'Deniz Gürsoy', role: 'Admin', desc: 'Full access' },
+    { sicil: 'T20112', password: process.env.NEXT_PUBLIC_DEMO_MANAGER_PASSWORD || '', name: 'Ayşe Demir', role: 'Manager', desc: 'Regional management' },
+    { sicil: 'T20113', password: process.env.NEXT_PUBLIC_DEMO_OPERATOR_PASSWORD || '', name: 'Mehmet Kaya', role: 'Operator', desc: 'Operations only' },
+    { sicil: 'T20114', password: process.env.NEXT_PUBLIC_DEMO_VIEWER_PASSWORD || '', name: 'Fatma Şahin', role: 'Viewer', desc: 'Read-only' },
   ];
 
   return (

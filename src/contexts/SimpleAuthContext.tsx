@@ -35,6 +35,14 @@ export function SimpleAuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false);
   }, []);
 
+  // SECURITY: Read passwords from environment variables
+  const DEMO_USERS: Record<string, string> = {
+    'T20111': process.env.NEXT_PUBLIC_DEMO_ADMIN_PASSWORD || 'CHANGE_ME',
+    'T20112': process.env.NEXT_PUBLIC_DEMO_MANAGER_PASSWORD || 'CHANGE_ME',
+    'T20113': process.env.NEXT_PUBLIC_DEMO_OPERATOR_PASSWORD || 'CHANGE_ME',
+    'T20114': process.env.NEXT_PUBLIC_DEMO_VIEWER_PASSWORD || 'CHANGE_ME',
+  };
+
   const login = (sicil: string, password: string): boolean => {
     const upperSicil = sicil.toUpperCase();
     if (DEMO_USERS[upperSicil] === password) {

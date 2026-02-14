@@ -103,6 +103,8 @@ export default function CommandCenterPage() {
   const [escalationEmails, setEscalationEmails] = useState<string>('');
   const [escalationSubject, setEscalationSubject] = useState<string>('');
   const [atmLocationFilter, setAtmLocationFilter] = useState<'all' | 'branch' | 'offsite'>('all'); // Şube/Offsite filtresi
+  const [cashManagementExpanded, setCashManagementExpanded] = useState(false); // Cash Management kartı collapsible
+  const [performanceManagementExpanded, setPerformanceManagementExpanded] = useState(false); // Performance Management kartı collapsible
   
   // Gerçek NM listesi (cash_center'lardan)
   const allNMs = [
@@ -1871,27 +1873,42 @@ Otomatik Eskalasyon Sistemi
       )}
 
       {/* EKİP YÖNETİMİ - OPERATÖR MASASI */}
-      <div className="bg-[#112544] rounded-2xl p-6 ring-1 ring-[#2B416B]">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <div className="text-lg font-semibold flex items-center gap-2">
-              💵 Cash Management İzleme Merkezi
-            </div>
-            <div className="text-xs text-[#A7B8D8] mt-1">
-              ATM izleme, ikmal/toplama yönetimi ve Bantaş koordinasyonu
+      <div className="bg-[#112544] rounded-2xl p-6 ring-1 ring-[#2B416B] transition-all duration-300 hover:ring-[#2E86FF]/50 hover:shadow-xl hover:shadow-[#2E86FF]/10">
+        <div 
+          className="flex items-center justify-between cursor-pointer group"
+          onClick={() => setCashManagementExpanded(!cashManagementExpanded)}
+        >
+          <div className="flex-1">
+            <div className="text-lg font-semibold flex items-center gap-3">
+              <span className="text-2xl">💵</span>
+              <div className="flex flex-col">
+                <span className="bg-gradient-to-r from-white to-[#2E86FF] bg-clip-text text-transparent">Cash Management İzleme Merkezi</span>
+                <div className="text-xs text-[#A7B8D8] mt-1 font-normal">
+                  ATM izleme, ikmal/toplama yönetimi ve Bantaş koordinasyonu
+                </div>
+              </div>
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#2E86FF] to-[#1F6FE0] flex items-center justify-center shadow-lg group-hover:shadow-[#2E86FF]/50 transition-all duration-300 group-hover:scale-110 ml-auto">
+                <span className={`text-white text-2xl font-bold transition-transform duration-500 ${cashManagementExpanded ? 'rotate-180' : 'rotate-0'}`}>
+                  {cashManagementExpanded ? "−" : "+"}
+                </span>
+              </div>
             </div>
           </div>
+          {cashManagementExpanded && (
           <button 
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation();
               setAddPersonnelTeam('cash');
               setShowAddPersonnelModal(true);
             }}
-            className="px-4 py-2 rounded-lg bg-[#2E86FF] hover:bg-[#1F6FE0] text-white text-sm font-semibold transition"
+            className="px-4 py-2 rounded-lg bg-gradient-to-r from-[#10B981] to-[#059669] hover:from-[#059669] hover:to-[#10B981] text-white text-sm font-semibold transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-105 ml-4"
           >
             + Yeni Personel
           </button>
+          )}
         </div>
 
+        <div className={`overflow-hidden transition-all duration-700 ease-in-out ${cashManagementExpanded ? 'max-h-[10000px] opacity-100 mt-6' : 'max-h-0 opacity-0 mt-0'}`}>
         {/* Operatör Kartları */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {operators.map((operator) => {
@@ -1902,18 +1919,33 @@ Otomatik Eskalasyon Sistemi
             const statusText = isActive ? 'Vardiya' : currentShift === 'İzin' ? 'İzin' : currentShift === 'Raporlu' ? 'Raporlu' : 'Pasif';
             
             return (
-              <div key={operator.id} className={`bg-gradient-to-br from-[${operator.color}]/20 to-[${operator.colorHover}]/10 rounded-xl p-5 ring-1 ring-[${operator.color}]/50 relative`}>
+              <div 
+                key={operator.id} 
+                className="bg-[#0E2142] rounded-xl p-5 ring-1 relative overflow-hidden"
+                style={{
+                  borderColor: `${operator.color}80`,
+                  boxShadow: `0 0 20px ${operator.color}20`
+                }}
+              >
+              {/* Gradient overlay */}
+              <div 
+                className="absolute inset-0 opacity-10 pointer-events-none"
+                style={{
+                  background: `linear-gradient(135deg, ${operator.color}20 0%, transparent 100%)`
+                }}
+              />
+              
               {/* Silme Butonu */}
               <button
                 onClick={() => handleRemoveOperator(operator.id, operator.name, 'cash')}
-                className="absolute top-3 right-3 w-6 h-6 rounded-full bg-[#EF4444]/20 hover:bg-[#EF4444] text-[#EF4444] hover:text-white transition flex items-center justify-center text-sm"
+                className="absolute top-3 right-3 w-6 h-6 rounded-full bg-[#EF4444]/20 hover:bg-[#EF4444] text-[#EF4444] hover:text-white transition flex items-center justify-center text-sm z-10"
                 title={`${operator.name} kişisini çıkar`}
               >
                 ✕
               </button>
               
               {/* Card header with avatar and status */}
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-3 relative z-10">
                 <div className="flex items-center gap-3">
                   <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold`} style={{background: `linear-gradient(to br, ${operator.color}, ${operator.colorHover})`}}>
                     {operator.name.charAt(0)}
@@ -1930,60 +1962,50 @@ Otomatik Eskalasyon Sistemi
               </div>
 
               {/* Tarih Aralığı ve Export */}
-              <div className="bg-[#0E2142]/60 rounded-lg p-3 mb-3">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="flex-1 grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-xs text-[#A7B8D8] block mb-1">Başlangıç</label>
-                      <input
-                        type="date"
-                        value={operatorDateRanges[operator.id]?.start || ''}
-                        onChange={(e) => setOperatorDateRanges(prev => ({
-                          ...prev,
-                          [operator.id]: { ...prev[operator.id], start: e.target.value }
-                        }))}
-                        className="w-full px-2 py-1 rounded bg-[#0E2142] text-white text-xs border border-[#2B416B] focus:outline-none focus:border-[#2E86FF]"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-[#A7B8D8] block mb-1">Bitiş</label>
-                      <input
-                        type="date"
-                        value={operatorDateRanges[operator.id]?.end || ''}
-                        onChange={(e) => setOperatorDateRanges(prev => ({
-                          ...prev,
-                          [operator.id]: { ...prev[operator.id], end: e.target.value }
-                        }))}
-                        className="w-full px-2 py-1 rounded bg-[#0E2142] text-white text-xs border border-[#2B416B] focus:outline-none focus:border-[#2E86FF]"
-                      />
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleExportOperatorHistory(operator)}
-                    className="px-3 py-2 rounded-lg bg-[#10B981] hover:bg-[#059669] text-white text-xs font-semibold transition mt-4"
-                    title="Excel'e Aktar"
-                  >
-                    📊 Excel
-                  </button>
+              <div className="bg-[#0E2142]/60 rounded-lg p-2 mb-2 relative z-10">
+                <div className="text-xs text-[#A7B8D8] mb-2">📊 Faaliyet Raporu</div>
+                <div className="grid grid-cols-2 gap-1 mb-2">
+                  <input
+                    type="date"
+                    value={operatorDateRanges[operator.id]?.start || ''}
+                    onChange={(e) => setOperatorDateRanges(prev => ({
+                      ...prev,
+                      [operator.id]: { ...prev[operator.id], start: e.target.value }
+                    }))}
+                    className="w-full px-2 py-1 rounded bg-[#0E2142] text-white text-xs border border-[#2B416B] focus:outline-none focus:border-[#2E86FF]"
+                  />
+                  <input
+                    type="date"
+                    value={operatorDateRanges[operator.id]?.end || ''}
+                    onChange={(e) => setOperatorDateRanges(prev => ({
+                      ...prev,
+                      [operator.id]: { ...prev[operator.id], end: e.target.value }
+                    }))}
+                    className="w-full px-2 py-1 rounded bg-[#0E2142] text-white text-xs border border-[#2B416B] focus:outline-none focus:border-[#2E86FF]"
+                  />
                 </div>
-                <div className="text-xs text-[#A7B8D8] mt-2">
-                  Bölge aktivitelerini ve geçmiş işlemleri görüntüle
-                </div>
+                <button
+                  onClick={() => handleExportOperatorHistory(operator)}
+                  className="w-full px-3 py-1.5 rounded-lg bg-[#10B981] hover:bg-[#059669] text-white text-xs font-semibold transition"
+                  title="Excel'e Aktar"
+                >
+                  📊 Excel İndir
+                </button>
               </div>
 
               {/* Sorumlu NM'ler section */}
-              <div className="bg-[#0E2142]/60 rounded-lg p-3 mb-3">
-                <div className="flex items-center justify-between mb-2">
+              <div className="bg-[#0E2142]/60 rounded-lg p-2 mb-2 relative z-10">
+                <div className="flex items-center justify-between mb-1">
                   <div className="text-xs text-[#A7B8D8]">Sorumlu NM&apos;ler</div>
                   <button 
                     onClick={() => handleAddItem(operator.id, 'nms')}
                     className="text-xs hover:opacity-80 transition" 
                     style={{color: operator.color}}
                   >
-                    + Ekle
+                    +
                   </button>
                 </div>
-                <div className="flex flex-wrap gap-1">
+                <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
                   {editingOperator === operator.id && editingField === 'nms' && (
                     <div className="flex items-center gap-1 mb-2 w-full">
                       <select
@@ -2020,17 +2042,17 @@ Otomatik Eskalasyon Sistemi
               </div>
 
               {/* NM Merkezleri section */}
-              <div className="bg-[#0E2142]/60 rounded-lg p-3 mb-3">
-                <div className="flex items-center justify-between mb-2">
+              <div className="bg-[#0E2142]/60 rounded-lg p-2 mb-2 relative z-10">
+                <div className="flex items-center justify-between mb-1">
                   <div className="text-xs text-[#A7B8D8]">NM Merkezleri</div>
                   <button 
                     onClick={() => handleAddItem(operator.id, 'nmCenters')}
                     className="text-xs text-[#10B981] hover:text-[#059669]"
                   >
-                    + Ekle
+                    +
                   </button>
                 </div>
-                <div className="flex flex-wrap gap-1">
+                <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
                   {editingOperator === operator.id && editingField === 'nmCenters' && (
                     <div className="flex items-center gap-1 mb-2 w-full">
                       <select
@@ -2066,14 +2088,14 @@ Otomatik Eskalasyon Sistemi
               </div>
 
               {/* SLA Ortalaması */}
-              <div className="bg-[#0E2142]/60 rounded-lg p-3 mb-3">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-xs text-[#A7B8D8]">Ortalama SLA Süresi</div>
+              <div className="bg-[#0E2142]/60 rounded-lg p-2 mb-2 relative z-10">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-xs text-[#A7B8D8]">Ort. SLA Süresi</div>
                   <button 
                     onClick={() => handleAddItem(operator.id, 'avgSla')}
                     className="text-xs text-[#F2B705] hover:text-[#F59E0B]"
                   >
-                    ✏️ Düzenle
+                    ✏️
                   </button>
                 </div>
                 {editingOperator === operator.id && editingField === 'avgSla' ? (
@@ -2141,7 +2163,7 @@ Otomatik Eskalasyon Sistemi
               )}
 
               {/* Metrics */}
-              <div className="grid grid-cols-3 gap-2 mb-3">
+              <div className="grid grid-cols-3 gap-2 mb-2 relative z-10">
                 <div className="bg-[#0E2142]/60 rounded-lg p-2 text-center">
                   <div className="text-xs text-[#A7B8D8]">ATM</div>
                   <div className="text-lg font-bold text-white">{operator.atmCount}</div>
@@ -2157,9 +2179,9 @@ Otomatik Eskalasyon Sistemi
               </div>
 
               {/* Active coordination */}
-              <div className="text-xs text-[#A7B8D8] mb-2">Aktif Koordinasyon</div>
-              <div className="rounded-lg p-2 ring-1" style={{backgroundColor: `${operator.color}33`, borderColor: `${operator.color}80`}}>
-                <div className="text-xs font-semibold" style={{color: operator.color}}>{operator.coordination}</div>
+              <div className="text-xs text-[#A7B8D8] mb-1 relative z-10">Aktif Koordinasyon</div>
+              <div className="rounded-lg p-2 ring-1 relative z-10 text-xs" style={{backgroundColor: `${operator.color}20`, borderColor: `${operator.color}60`}}>
+                <div className="font-semibold line-clamp-2" style={{color: operator.color}}>{operator.coordination}</div>
               </div>
               </div>
             );
@@ -2240,319 +2262,166 @@ Otomatik Eskalasyon Sistemi
             })}
           </div>
         </div>
+        </div>
       </div>
 
-      {/* ATM PERFORMANCE MANAGEMENT EKİBİ - 7/24 ARIZA & SLM KOORDİNASYONU */}
-      <div className="bg-[#112544] rounded-2xl p-6 ring-1 ring-[#2B416B]">
+      {/* ATM PERFORMANCE MANAGEMENT - KPI KARTLARI (Cash Management Benzeri) */}
+      <div className="bg-[#112544] rounded-2xl p-6 ring-1 ring-[#2B416B] transition-all duration-300 hover:ring-[#EF4444]/50">
         <div className="flex items-center justify-between mb-6">
-          <div>
-            <div className="text-lg font-semibold flex items-center gap-2">
-              🔧 ATM Performance Management (7/24)
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">🔧</span>
+            <div>
+              <div className="text-lg font-semibold bg-gradient-to-r from-white to-[#EF4444] bg-clip-text text-transparent">
+                ATM Performance - Operasyon Özeti
+              </div>
+              <div className="text-xs text-[#A7B8D8] mt-1">
+                Arıza takip, SLA performansı ve saha ekip durumu
+              </div>
             </div>
-            <div className="text-xs text-[#A7B8D8] mt-1">
-              Arıza takip, saha çağrı yönetimi, SLM koordinasyonu • Hafta içi 07:00-01:00 vardiyalı hizmet
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="px-3 py-1.5 rounded-lg bg-[#EF4444]/20 text-[#EF4444] text-xs font-semibold">
-              🔴 7/24 Aktif
-            </div>
-            <div className="px-3 py-1.5 rounded-lg bg-[#2E86FF]/20 text-[#2E86FF] text-xs font-semibold">
-              07:00-01:00
-            </div>
-            <button 
-              onClick={() => {
-                setAddPersonnelTeam('performance');
-                setShowAddPersonnelModal(true);
-              }}
-              className="px-4 py-2 rounded-lg bg-[#2E86FF] hover:bg-[#1F6FE0] text-white text-sm font-semibold transition"
-            >
-              + Yeni Personel
-            </button>
           </div>
         </div>
 
-        {/* Performance Team Kartları */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {performanceTeam.map((operator) => {
-            const today = new Date().toISOString().split('T')[0];
-            const currentShift = getShiftForPersonnelAndDate(operator.name, today);
-            const isActive = currentShift === 'Gündüz' || currentShift === 'Akşam';
-            const statusColor = isActive ? '#10B981' : currentShift === 'İzin' ? '#F59E0B' : '#EF4444';
-            const statusText = isActive ? 'Vardiya' : currentShift === 'İzin' ? 'İzin' : currentShift === 'Raporlu' ? 'Raporlu' : 'Pasif';
-            
-            return (
-            <div key={operator.id} className={`bg-gradient-to-br from-[${operator.color}]/20 to-[${operator.colorHover}]/10 rounded-xl p-5 ring-1 ring-[${operator.color}]/50 relative`}>
-              {/* Silme Butonu */}
-              <button
-                onClick={() => handleRemoveOperator(operator.id, operator.name, 'performance')}
-                className="absolute top-3 right-3 w-6 h-6 rounded-full bg-[#EF4444]/20 hover:bg-[#EF4444] text-[#EF4444] hover:text-white transition flex items-center justify-center text-sm"
-                title={`${operator.name} kişisini çıkar`}
-              >
-                ✕
-              </button>
-              
-              {/* Card header with avatar and status */}
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold`} style={{background: `linear-gradient(to br, ${operator.color}, ${operator.colorHover})`}}>
-                    {operator.name.charAt(0)}
-                  </div>
-                  <div>
-                    <div className="font-bold text-white">{operator.name}</div>
-                    <div className="text-xs text-[#A7B8D8]">{operator.role}</div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className={`w-3 h-3 rounded-full ${isActive ? 'animate-pulse' : ''}`} style={{backgroundColor: statusColor}}></div>
-                  <span className="text-xs" style={{color: statusColor}}>{statusText}</span>
-                </div>
+        {/* KPI Kartları */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Bugünkü Arıza */}
+          <div className="bg-gradient-to-br from-[#EF4444]/10 to-[#DC2626]/5 rounded-xl p-5 ring-1 ring-[#EF4444]/30 hover:ring-[#EF4444]/60 transition-all hover:scale-105">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm text-[#A7B8D8]">Bugünkü Arıza</div>
+              <div className="text-2xl">🚨</div>
+            </div>
+            <div className="text-4xl font-bold text-white mb-3">32</div>
+            <div className="flex items-center gap-2 text-xs mb-3">
+              <span className="text-[#EF4444]">↑ 5 (18.5%)</span>
+              <span className="text-[#A7B8D8]">önceki güne göre</span>
+            </div>
+            <div className="space-y-1 text-xs">
+              <div className="flex justify-between">
+                <span className="text-[#A7B8D8]">Kritik:</span>
+                <span className="text-[#EF4444] font-bold">8</span>
               </div>
-
-              {/* Tarih Aralığı ve Export */}
-              <div className="bg-[#0E2142]/60 rounded-lg p-3 mb-3">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="flex-1 grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-xs text-[#A7B8D8] block mb-1">Başlangıç</label>
-                      <input
-                        type="date"
-                        value={operatorDateRanges[operator.id]?.start || ''}
-                        onChange={(e) => setOperatorDateRanges(prev => ({
-                          ...prev,
-                          [operator.id]: { ...prev[operator.id], start: e.target.value }
-                        }))}
-                        className="w-full px-2 py-1 rounded bg-[#0E2142] text-white text-xs border border-[#2B416B] focus:outline-none focus:border-[#2E86FF]"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-[#A7B8D8] block mb-1">Bitiş</label>
-                      <input
-                        type="date"
-                        value={operatorDateRanges[operator.id]?.end || ''}
-                        onChange={(e) => setOperatorDateRanges(prev => ({
-                          ...prev,
-                          [operator.id]: { ...prev[operator.id], end: e.target.value }
-                        }))}
-                        className="w-full px-2 py-1 rounded bg-[#0E2142] text-white text-xs border border-[#2B416B] focus:outline-none focus:border-[#2E86FF]"
-                      />
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleExportOperatorHistory(operator)}
-                    className="px-3 py-2 rounded-lg bg-[#10B981] hover:bg-[#059669] text-white text-xs font-semibold transition mt-4"
-                    title="Excel'e Aktar"
-                  >
-                    📊 Excel
-                  </button>
-                </div>
-                <div className="text-xs text-[#A7B8D8] mt-2">
-                  Arıza takip ve çağrı geçmişini görüntüle
-                </div>
-              </div>
-
-              {/* Sorumlu Bölgeler */}
-              <div className="bg-[#0E2142]/60 rounded-lg p-3 mb-3">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-xs text-[#A7B8D8]">Sorumlu Bölgeler</div>
-                  <button 
-                    onClick={() => handleAddItem(operator.id, 'nms')}
-                    className="text-xs hover:opacity-80 transition" 
-                    style={{color: operator.color}}
-                  >
-                    + Ekle
-                  </button>
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {editingOperator === operator.id && editingField === 'nms' && (
-                    <div className="flex items-center gap-1 mb-2 w-full">
-                      <select
-                        value={newValue}
-                        onChange={(e) => setNewValue(e.target.value)}
-                        className="flex-1 px-2 py-1 rounded bg-[#0E2142] text-white text-xs border border-[#2B416B] focus:outline-none focus:border-[#2E86FF]"
-                        autoFocus
-                      >
-                        <option value="">NM seçin...</option>
-                        {allNMs.filter(nm => !operator.nms.includes(nm)).map(nm => (
-                          <option key={nm} value={nm}>{nm}</option>
-                        ))}
-                      </select>
-                      <button onClick={handleSaveItem} className="px-2 py-1 rounded bg-[#10B981] text-white text-xs">✓</button>
-                      <button onClick={() => { setEditingOperator(null); setEditingField(null); }} className="px-2 py-1 rounded bg-[#EF4444] text-white text-xs">✕</button>
-                    </div>
-                  )}
-                  {operator.nms.map((nm) => (
-                    <span 
-                      key={nm} 
-                      className="px-2 py-1 rounded text-xs text-white flex items-center gap-1 group"
-                      style={{backgroundColor: `${operator.color}4D`}}
-                    >
-                      {nm}
-                      <button 
-                        onClick={() => handleRemoveItem(operator.id, 'nms', nm)}
-                        className="opacity-0 group-hover:opacity-100 text-white/70 hover:text-white transition"
-                      >
-                        ✕
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              {/* SLA Performance */}
-              <div className="bg-[#0E2142]/60 rounded-lg p-3 mb-3">
-                <div className="text-xs text-[#A7B8D8] mb-2">Ortalama Müdahale Süresi</div>
-                <div className="flex items-center gap-2">
-                  <div className="text-2xl font-bold text-white">{operator.avgSla}</div>
-                  <div className="text-xs text-[#A7B8D8]">saat</div>
-                  <div className={`ml-auto px-2 py-1 rounded text-xs font-semibold ${
-                    operator.avgSla <= 2.0 ? 'bg-[#10B981]/20 text-[#10B981]' :
-                    operator.avgSla <= 2.5 ? 'bg-[#F2B705]/20 text-[#F2B705]' :
-                    'bg-[#EF4444]/20 text-[#EF4444]'
-                  }`}>
-                    {operator.avgSla <= 2.0 ? '✓ Hızlı' : operator.avgSla <= 2.5 ? '⚠ Normal' : '✗ Yavaş'}
-                  </div>
-                </div>
-              </div>
-
-              {/* Çağrı İstatistikleri */}
-              {operator.callsOutgoing !== undefined && (
-                <div className="bg-[#0E2142]/60 rounded-lg p-3 mb-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="text-xs text-[#A7B8D8]">Çağrı Performansı</div>
-                    <div className={`px-2 py-0.5 rounded text-xs font-bold ${
-                      (operator.callScore || 0) >= 90 ? 'bg-[#10B981]/20 text-[#10B981]' :
-                      (operator.callScore || 0) >= 75 ? 'bg-[#F2B705]/20 text-[#F2B705]' :
-                      'bg-[#EF4444]/20 text-[#EF4444]'
-                    }`}>
-                      {operator.callScore || 0}/100
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="flex items-center gap-2">
-                      <div className="text-xs text-[#A7B8D8]">📞 Aranan:</div>
-                      <div className="text-sm font-bold text-white">{operator.callsOutgoing}</div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="text-xs text-[#A7B8D8]">📲 Gelen:</div>
-                      <div className="text-sm font-bold text-white">{operator.callsIncoming}</div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="text-xs text-[#A7B8D8]">⏱️ Giden:</div>
-                      <div className="text-sm font-bold text-[#2E86FF]">{operator.callsDurationOutgoing}dk</div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="text-xs text-[#A7B8D8]">⏱️ Geçen:</div>
-                      <div className="text-sm font-bold text-[#F2B705]">{operator.callsDurationIncoming}dk</div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Günlük İstatistikler */}
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                <div className="bg-[#0E2142]/60 rounded-lg p-2 text-center">
-                  <div className="text-xs text-[#A7B8D8]">ATM Sayısı</div>
-                  <div className="text-lg font-bold text-white">{operator.atmCount}</div>
-                </div>
-                <div className="bg-[#0E2142]/60 rounded-lg p-2 text-center">
-                  <div className="text-xs text-[#A7B8D8]">NM Merkezi</div>
-                  <div className="text-lg font-bold text-[#2E86FF]">{operator.nmCenters.length}</div>
-                </div>
-              </div>
-
-              {/* Active coordination */}
-              <div className="text-xs text-[#A7B8D8] mb-2">Anlık Durum</div>
-              <div className="rounded-lg p-2 ring-1" style={{backgroundColor: `${operator.color}33`, borderColor: `${operator.color}80`}}>
-                <div className="text-xs font-semibold" style={{color: operator.color}}>{operator.coordination}</div>
+              <div className="flex justify-between">
+                <span className="text-[#A7B8D8]">Normal:</span>
+                <span className="text-[#F59E0B] font-bold">24</span>
               </div>
             </div>
-            );
-          })}
+          </div>
+
+          {/* SLA Uyum */}
+          <div className="bg-gradient-to-br from-[#10B981]/10 to-[#059669]/5 rounded-xl p-5 ring-1 ring-[#10B981]/30 hover:ring-[#10B981]/60 transition-all hover:scale-105">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm text-[#A7B8D8]">SLA Uyum</div>
+              <div className="text-2xl">✓</div>
+            </div>
+            <div className="text-4xl font-bold text-white mb-3">94.2%</div>
+            <div className="flex items-center gap-2 text-xs mb-3">
+              <span className="text-[#10B981]">↓ 1.8%</span>
+              <span className="text-[#A7B8D8]">geçen haftaya göre</span>
+            </div>
+            <div className="space-y-1 text-xs">
+              <div className="flex justify-between">
+                <span className="text-[#A7B8D8]">Hedef:</span>
+                <span className="text-white font-bold">95%</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[#A7B8D8]">SLA Aşım:</span>
+                <span className="text-[#EF4444] font-bold">3 ATM</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Ortalama Müdahale */}
+          <div className="bg-gradient-to-br from-[#F59E0B]/10 to-[#F97316]/5 rounded-xl p-5 ring-1 ring-[#F59E0B]/30 hover:ring-[#F59E0B]/60 transition-all hover:scale-105">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm text-[#A7B8D8]">Ortalama Müdahale</div>
+              <div className="text-2xl">⚙️</div>
+            </div>
+            <div className="flex items-baseline gap-1 mb-3">
+              <div className="text-4xl font-bold text-white">1.8</div>
+              <div className="text-lg text-[#A7B8D8]">saat</div>
+            </div>
+            <div className="flex items-center gap-2 text-xs mb-3">
+              <span className="text-[#10B981]">↓ 0.3 saat</span>
+              <span className="text-[#A7B8D8]">daha hızlı</span>
+            </div>
+            <div className="space-y-1 text-xs">
+              <div className="flex justify-between">
+                <span className="text-[#A7B8D8]">En Hızlı:</span>
+                <span className="text-[#10B981] font-bold">0.5 saat</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[#A7B8D8]">En Yavaş:</span>
+                <span className="text-[#EF4444] font-bold">3.2 saat</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Aktif Personel */}
+          <div className="bg-gradient-to-br from-[#2E86FF]/10 to-[#1F6FE0]/5 rounded-xl p-5 ring-1 ring-[#2E86FF]/30 hover:ring-[#2E86FF]/60 transition-all hover:scale-105">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm text-[#A7B8D8]">Aktif Personel</div>
+              <div className="text-2xl">👥</div>
+            </div>
+            <div className="flex items-baseline gap-1 mb-3">
+              <div className="text-4xl font-bold text-white">{performanceTeam.filter(p => {
+                const today = new Date().toISOString().split('T')[0];
+                const shift = getShiftForPersonnelAndDate(p.name, today);
+                return shift === 'Gündüz' || shift === 'Akşam';
+              }).length}</div>
+              <div className="text-2xl text-[#A7B8D8]">/</div>
+              <div className="text-2xl text-[#A7B8D8]">{performanceTeam.length}</div>
+            </div>
+            <div className="flex items-center gap-2 text-xs mb-3">
+              <span className="text-[#10B981]">✓ Tam kadro</span>
+            </div>
+            <div className="space-y-1 text-xs">
+              <div className="flex justify-between">
+                <span className="text-[#A7B8D8]">Vardiya:</span>
+                <span className="text-white font-bold">Gündüz</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[#A7B8D8]">Saha Ekip:</span>
+                <span className="text-[#2E86FF] font-bold">12 aktif</span>
+              </div>
+            </div>
+          </div>
         </div>
 
-        {/* Ekip Özeti */}
-        <div className="mt-6 grid grid-cols-1 lg:grid-cols-6 gap-4">
-          <div className="bg-[#0E2142]/60 rounded-xl p-4 ring-1 ring-[#2B416B]">
-            <div className="text-xs text-[#A7B8D8] mb-2">Toplam Personel</div>
-            <div className="text-3xl font-bold text-white">{performanceTeam.length}</div>
-          </div>
-          <div className="bg-[#0E2142]/60 rounded-xl p-4 ring-1 ring-[#2B416B]">
-            <div className="text-xs text-[#A7B8D8] mb-2">Aktif Arıza</div>
-            <div className="text-3xl font-bold text-[#EF4444]">25</div>
-          </div>
-          <div className="bg-[#0E2142]/60 rounded-xl p-4 ring-1 ring-[#2B416B]">
-            <div className="text-xs text-[#A7B8D8] mb-2">SLM Çağrı</div>
-            <div className="text-3xl font-bold text-[#F59E0B]">5</div>
-          </div>
-          <div className="bg-[#0E2142]/60 rounded-xl p-4 ring-1 ring-[#2B416B]">
-            <div className="text-xs text-[#A7B8D8] mb-2">Arıza Bildirim</div>
-            <div className="text-3xl font-bold text-[#2E86FF]">0.4h</div>
-            <div className="text-xs text-[#10B981] mt-1">✓ Hızlı</div>
-          </div>
-          <div className="bg-[#0E2142]/60 rounded-xl p-4 ring-1 ring-[#2B416B]">
-            <div className="text-xs text-[#A7B8D8] mb-2">Ort. Müdahale</div>
-            <div className="text-3xl font-bold text-[#10B981]">{performanceTeam.length > 0 ? (performanceTeam.reduce((sum, op) => sum + op.avgSla, 0) / performanceTeam.length).toFixed(1) : '0'}h</div>
-          </div>
-          <div className="bg-[#0E2142]/60 rounded-xl p-4 ring-1 ring-[#2B416B]">
-            <div className="text-xs text-[#A7B8D8] mb-2">Vardiya Durumu</div>
-            <div className="text-3xl font-bold text-[#10B981]">{performanceTeam.filter(op => {
-              const today = new Date().toISOString().split('T')[0];
-              const currentShift = getShiftForPersonnelAndDate(op.name, today);
-              return currentShift === 'Gündüz' || currentShift === 'Akşam';
-            }).length}/{performanceTeam.length}</div>
-          </div>
-        </div>
-
-        {/* Bugünkü Vardiya Durumu */}
-        <div className="mt-6 bg-[#0E2142]/40 rounded-xl p-4 ring-1 ring-[#2B416B]">
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-sm font-semibold text-white">📅 Bugünkü Vardiya Durumu</div>
-            <button
-              onClick={() => setShowShiftManagementModal(true)}
-              className="text-xs px-3 py-1.5 rounded-lg bg-[#2E86FF]/20 hover:bg-[#2E86FF]/40 text-[#2E86FF] transition"
-            >
-              Vardiya Düzenle
-            </button>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {performanceTeam.map(op => {
-              const today = new Date().toISOString().split('T')[0];
-              const currentShift = getShiftForPersonnelAndDate(op.name, today);
-              const isActive = currentShift === 'Gündüz' || currentShift === 'Akşam';
-              const statusColor = isActive ? '#10B981' : currentShift === 'İzin' ? '#F59E0B' : '#EF4444';
-              
-              return (
-                <div key={op.id} className="bg-[#0E2142]/60 rounded-lg p-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                    <div className={`w-2 h-2 rounded-full flex-shrink-0`} style={{backgroundColor: statusColor}}></div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-semibold text-white truncate">{op.name}</div>
-                      <div className="text-xs" style={{color: statusColor}}>{currentShift}</div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setSelectedPersonnel(op.name);
-                      setSelectedDate(today);
-                      setShowShiftModal(true);
-                    }}
-                    className="text-xs px-2 py-1 rounded bg-[#2E86FF]/20 hover:bg-[#2E86FF]/40 text-[#2E86FF] transition flex-shrink-0"
-                  >
-                    Değiştir
-                  </button>
-                </div>
-              );
-            })}
+        {/* Alt Bilgi Çubuğu */}
+        <div className="mt-6 bg-[#0E2142]/60 rounded-xl p-4 ring-1 ring-[#2B416B]">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+            <div>
+              <div className="text-xs text-[#A7B8D8] mb-1">Açık Arıza</div>
+              <div className="text-2xl font-bold text-[#EF4444]">25</div>
+            </div>
+            <div>
+              <div className="text-xs text-[#A7B8D8] mb-1">Kapanan Arıza (Bugün)</div>
+              <div className="text-2xl font-bold text-[#10B981]">18</div>
+            </div>
+            <div>
+              <div className="text-xs text-[#A7B8D8] mb-1">Bekleyen SLM</div>
+              <div className="text-2xl font-bold text-[#F59E0B]">5</div>
+            </div>
+            <div>
+              <div className="text-xs text-[#A7B8D8] mb-1">Ortalama Çözüm Süresi</div>
+              <div className="text-2xl font-bold text-[#2E86FF]">2.3 saat</div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* En Yoğun Nakit Merkezleri - Arıza/SLM Bazlı */}
-      <div className="bg-[#0E2142]/60 rounded-xl p-5 ring-1 ring-[#2B416B] mt-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="text-sm font-semibold flex items-center gap-2">
-            🔥 En Yoğun Nakit Merkezleri (Son 24 Saat)
+      {/* En Yoğun Nakit Merkezleri - Arıza/SLM Bazlı - BAĞIMSIZ KART */}
+      <div className="bg-[#112544] rounded-2xl p-6 ring-1 ring-[#2B416B] transition-all duration-300 hover:ring-[#F59E0B]/50 hover:shadow-xl hover:shadow-[#F59E0B]/10">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">🔥</span>
+            <div>
+              <div className="text-lg font-semibold bg-gradient-to-r from-white to-[#F59E0B] bg-clip-text text-transparent">
+                En Yoğun Nakit Merkezleri (Son 24 Saat)
+              </div>
+              <div className="text-xs text-[#A7B8D8] mt-1">
+                Arıza ve SLM çağrı yoğunluğuna göre sıralı nakit merkezi performans analizi
+              </div>
+            </div>
           </div>
           
           {/* Şube/Offsite Sekmesi */}
@@ -2605,7 +2474,7 @@ Otomatik Eskalasyon Sistemi
                 setSelectedRegion(region.name);
                 setShowRegionModal(true);
               }}
-              className={`bg-[#0E2142] rounded-lg p-4 ring-1 ring-[#${region.color}]/50 cursor-pointer hover:bg-[#1A2F52] transition-all`}
+              className={`bg-[#0E2142] rounded-lg p-4 ring-1 ring-[#${region.color}]/50 cursor-pointer hover:bg-[#1A2F52] transition-all hover:scale-105 hover:shadow-lg`}
             >
               <div className="flex items-center justify-between mb-2">
                 <div className="text-lg font-bold text-white">{region.rank}.</div>
@@ -2635,6 +2504,332 @@ Otomatik Eskalasyon Sistemi
               </div>
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* ATM PERFORMANCE MANAGEMENT EKİBİ - 7/24 ARIZA & SLM KOORDİNASYONU */}
+      <div className="bg-[#112544] rounded-2xl p-6 ring-1 ring-[#2B416B] transition-all duration-300 hover:ring-[#EF4444]/50 hover:shadow-xl hover:shadow-[#EF4444]/10">
+        <div 
+          className="flex items-center justify-between cursor-pointer group"
+          onClick={() => setPerformanceManagementExpanded(!performanceManagementExpanded)}
+        >
+          <div className="flex-1">
+            <div className="text-lg font-semibold flex items-center gap-3">
+              <span className="text-2xl">🔧</span>
+              <div className="flex flex-col">
+                <span className="bg-gradient-to-r from-white to-[#EF4444] bg-clip-text text-transparent">ATM Performance Management (7/24)</span>
+                <div className="text-xs text-[#A7B8D8] mt-1 font-normal">
+                  Arıza takip, saha çağrı yönetimi, SLM koordinasyonu • Hafta içi 07:00-01:00 vardiyalı hizmet
+                </div>
+              </div>
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#EF4444] to-[#DC2626] flex items-center justify-center shadow-lg group-hover:shadow-[#EF4444]/50 transition-all duration-300 group-hover:scale-110 ml-auto">
+                <span className={`text-white text-2xl font-bold transition-transform duration-500 ${performanceManagementExpanded ? 'rotate-180' : 'rotate-0'}`}>
+                  {performanceManagementExpanded ? "−" : "+"}
+                </span>
+              </div>
+            </div>
+          </div>
+          {performanceManagementExpanded && (
+          <div className="flex items-center gap-2 ml-4">
+            <div className="px-3 py-1.5 rounded-lg bg-[#EF4444]/20 text-[#EF4444] text-xs font-semibold animate-pulse">
+              🔴 7/24 Aktif
+            </div>
+            <div className="px-3 py-1.5 rounded-lg bg-[#2E86FF]/20 text-[#2E86FF] text-xs font-semibold">
+              07:00-01:00
+            </div>
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                setAddPersonnelTeam('performance');
+                setShowAddPersonnelModal(true);
+              }}
+              className="px-4 py-2 rounded-lg bg-gradient-to-r from-[#10B981] to-[#059669] hover:from-[#059669] hover:to-[#10B981] text-white text-sm font-semibold transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-105"
+            >
+              + Yeni Personel
+            </button>
+          </div>
+          )}
+        </div>
+
+        <div className={`overflow-hidden transition-all duration-700 ease-in-out ${performanceManagementExpanded ? 'max-h-[10000px] opacity-100 mt-6' : 'max-h-0 opacity-0 mt-0'}`}>
+        {/* Performance Team Kartları */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {performanceTeam.map((operator) => {
+            const today = new Date().toISOString().split('T')[0];
+            const currentShift = getShiftForPersonnelAndDate(operator.name, today);
+            const isActive = currentShift === 'Gündüz' || currentShift === 'Akşam';
+            const statusColor = isActive ? '#10B981' : currentShift === 'İzin' ? '#F59E0B' : '#EF4444';
+            const statusText = isActive ? 'Vardiya' : currentShift === 'İzin' ? 'İzin' : currentShift === 'Raporlu' ? 'Raporlu' : 'Pasif';
+            
+            return (
+            <div 
+              key={operator.id} 
+              className="bg-[#0E2142] rounded-xl p-5 ring-1 relative overflow-hidden"
+              style={{
+                borderColor: `${operator.color}80`,
+                boxShadow: `0 0 20px ${operator.color}20`
+              }}
+            >
+              {/* Gradient overlay */}
+              <div 
+                className="absolute inset-0 opacity-10 pointer-events-none"
+                style={{
+                  background: `linear-gradient(135deg, ${operator.color}20 0%, transparent 100%)`
+                }}
+              />
+              
+              {/* Silme Butonu */}
+              <button
+                onClick={() => handleRemoveOperator(operator.id, operator.name, 'performance')}
+                className="absolute top-3 right-3 w-6 h-6 rounded-full bg-[#EF4444]/20 hover:bg-[#EF4444] text-[#EF4444] hover:text-white transition flex items-center justify-center text-sm z-10"
+                title={`${operator.name} kişisini çıkar`}
+              >
+                ✕
+              </button>
+              
+              {/* Card header with avatar and status */}
+              <div className="flex items-center justify-between mb-3 relative z-10">
+                <div className="flex items-center gap-3">
+                  <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold`} style={{background: `linear-gradient(to br, ${operator.color}, ${operator.colorHover})`}}>
+                    {operator.name.charAt(0)}
+                  </div>
+                  <div>
+                    <div className="font-bold text-white">{operator.name}</div>
+                    <div className="text-xs text-[#A7B8D8]">{operator.role}</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className={`w-3 h-3 rounded-full ${isActive ? 'animate-pulse' : ''}`} style={{backgroundColor: statusColor}}></div>
+                  <span className="text-xs" style={{color: statusColor}}>{statusText}</span>
+                </div>
+              </div>
+
+              {/* Tarih Aralığı ve Export */}
+              <div className="bg-[#0E2142]/60 rounded-lg p-2 mb-2 relative z-10">
+                <div className="text-xs text-[#A7B8D8] mb-2">📊 Performans Raporu</div>
+                <div className="grid grid-cols-2 gap-1 mb-2">
+                  <input
+                    type="date"
+                    value={operatorDateRanges[operator.id]?.start || ''}
+                    onChange={(e) => setOperatorDateRanges(prev => ({
+                      ...prev,
+                      [operator.id]: { ...prev[operator.id], start: e.target.value }
+                    }))}
+                    className="w-full px-2 py-1 rounded bg-[#0E2142] text-white text-xs border border-[#2B416B] focus:outline-none focus:border-[#2E86FF]"
+                  />
+                  <input
+                    type="date"
+                    value={operatorDateRanges[operator.id]?.end || ''}
+                    onChange={(e) => setOperatorDateRanges(prev => ({
+                      ...prev,
+                      [operator.id]: { ...prev[operator.id], end: e.target.value }
+                    }))}
+                    className="w-full px-2 py-1 rounded bg-[#0E2142] text-white text-xs border border-[#2B416B] focus:outline-none focus:border-[#2E86FF]"
+                  />
+                </div>
+                <button
+                  onClick={() => handleExportOperatorHistory(operator)}
+                  className="w-full px-3 py-1.5 rounded-lg bg-[#10B981] hover:bg-[#059669] text-white text-xs font-semibold transition"
+                  title="Excel'e Aktar"
+                >
+                  📊 Excel İndir
+                </button>
+              </div>
+
+              {/* Sorumlu Bölgeler */}
+              <div className="bg-[#0E2142]/60 rounded-lg p-2 mb-2 relative z-10">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-xs text-[#A7B8D8]">Sorumlu Bölgeler</div>
+                  <button 
+                    onClick={() => handleAddItem(operator.id, 'nms')}
+                    className="text-xs hover:opacity-80 transition" 
+                    style={{color: operator.color}}
+                  >
+                    +
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
+                  {editingOperator === operator.id && editingField === 'nms' && (
+                    <div className="flex items-center gap-1 mb-2 w-full">
+                      <select
+                        value={newValue}
+                        onChange={(e) => setNewValue(e.target.value)}
+                        className="flex-1 px-2 py-1 rounded bg-[#0E2142] text-white text-xs border border-[#2B416B] focus:outline-none focus:border-[#2E86FF]"
+                        autoFocus
+                      >
+                        <option value="">NM seçin...</option>
+                        {allNMs.filter(nm => !operator.nms.includes(nm)).map(nm => (
+                          <option key={nm} value={nm}>{nm}</option>
+                        ))}
+                      </select>
+                      <button onClick={handleSaveItem} className="px-2 py-1 rounded bg-[#10B981] text-white text-xs">✓</button>
+                      <button onClick={() => { setEditingOperator(null); setEditingField(null); }} className="px-2 py-1 rounded bg-[#EF4444] text-white text-xs">✕</button>
+                    </div>
+                  )}
+                  {operator.nms.map((nm) => (
+                    <span 
+                      key={nm} 
+                      className="px-2 py-1 rounded text-xs text-white flex items-center gap-1 group"
+                      style={{backgroundColor: `${operator.color}4D`}}
+                    >
+                      {nm}
+                      <button 
+                        onClick={() => handleRemoveItem(operator.id, 'nms', nm)}
+                        className="opacity-0 group-hover:opacity-100 text-white/70 hover:text-white transition"
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* SLA Performance */}
+              <div className="bg-[#0E2142]/60 rounded-lg p-2 mb-2 relative z-10">
+                <div className="text-xs text-[#A7B8D8] mb-1">Ort. Müdahale</div>
+                <div className="flex items-center gap-2">
+                  <div className="text-2xl font-bold text-white">{operator.avgSla}</div>
+                  <div className="text-xs text-[#A7B8D8]">saat</div>
+                  <div className={`ml-auto px-2 py-1 rounded text-xs font-semibold ${
+                    operator.avgSla <= 2.0 ? 'bg-[#10B981]/20 text-[#10B981]' :
+                    operator.avgSla <= 2.5 ? 'bg-[#F2B705]/20 text-[#F2B705]' :
+                    'bg-[#EF4444]/20 text-[#EF4444]'
+                  }`}>
+                    {operator.avgSla <= 2.0 ? '✓ Hızlı' : operator.avgSla <= 2.5 ? '⚠ Normal' : '✗ Yavaş'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Çağrı İstatistikleri */}
+              {operator.callsOutgoing !== undefined && (
+                <div className="bg-[#0E2142]/60 rounded-lg p-2 mb-2 relative z-10">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-xs text-[#A7B8D8]">Çağrı Performansı</div>
+                    <div className={`px-2 py-0.5 rounded text-xs font-bold ${
+                      (operator.callScore || 0) >= 90 ? 'bg-[#10B981]/20 text-[#10B981]' :
+                      (operator.callScore || 0) >= 75 ? 'bg-[#F2B705]/20 text-[#F2B705]' :
+                      'bg-[#EF4444]/20 text-[#EF4444]'
+                    }`}>
+                      {operator.callScore || 0}/100
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="text-xs text-[#A7B8D8]">📞 Aranan:</div>
+                      <div className="text-sm font-bold text-white">{operator.callsOutgoing}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="text-xs text-[#A7B8D8]">📲 Gelen:</div>
+                      <div className="text-sm font-bold text-white">{operator.callsIncoming}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="text-xs text-[#A7B8D8]">⏱️ Giden:</div>
+                      <div className="text-sm font-bold text-[#2E86FF]">{operator.callsDurationOutgoing}dk</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="text-xs text-[#A7B8D8]">⏱️ Geçen:</div>
+                      <div className="text-sm font-bold text-[#F2B705]">{operator.callsDurationIncoming}dk</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Günlük İstatistikler */}
+              <div className="grid grid-cols-2 gap-2 mb-2 relative z-10">
+                <div className="bg-[#0E2142]/60 rounded-lg p-2 text-center">
+                  <div className="text-xs text-[#A7B8D8]">ATM Sayısı</div>
+                  <div className="text-lg font-bold text-white">{operator.atmCount}</div>
+                </div>
+                <div className="bg-[#0E2142]/60 rounded-lg p-2 text-center">
+                  <div className="text-xs text-[#A7B8D8]">NM Merkezi</div>
+                  <div className="text-lg font-bold text-[#2E86FF]">{operator.nmCenters.length}</div>
+                </div>
+              </div>
+
+              {/* Active coordination */}
+              <div className="text-xs text-[#A7B8D8] mb-1 relative z-10">Anlık Durum</div>
+              <div className="rounded-lg p-2 ring-1 relative z-10 text-xs" style={{backgroundColor: `${operator.color}20`, borderColor: `${operator.color}60`}}>
+                <div className="font-semibold line-clamp-2" style={{color: operator.color}}>{operator.coordination}</div>
+              </div>
+            </div>
+            );
+          })}
+        </div>
+
+        {/* Ekip Özeti */}
+        <div className="mt-6 grid grid-cols-1 lg:grid-cols-6 gap-4">
+          <div className="bg-[#0E2142]/60 rounded-xl p-4 ring-1 ring-[#2B416B]">
+            <div className="text-xs text-[#A7B8D8] mb-2">Toplam Personel</div>
+            <div className="text-3xl font-bold text-white">{performanceTeam.length}</div>
+          </div>
+          <div className="bg-[#0E2142]/60 rounded-xl p-4 ring-1 ring-[#2B416B]">
+            <div className="text-xs text-[#A7B8D8] mb-2">Aktif Arıza</div>
+            <div className="text-3xl font-bold text-[#EF4444]">25</div>
+          </div>
+          <div className="bg-[#0E2142]/60 rounded-xl p-4 ring-1 ring-[#2B416B]">
+            <div className="text-xs text-[#A7B8D8] mb-2">SLM Çağrı</div>
+            <div className="text-3xl font-bold text-[#F59E0B]">5</div>
+          </div>
+          <div className="bg-[#0E2142]/60 rounded-xl p-4 ring-1 ring-[#2B416B]">
+            <div className="text-xs text-[#A7B8D8] mb-2">Ortalama SLA</div>
+            <div className="text-3xl font-bold text-[#2E86FF]">{(performanceTeam.reduce((sum, p) => sum + p.avgSla, 0) / performanceTeam.length).toFixed(1)}h</div>
+          </div>
+          <div className="bg-[#0E2142]/60 rounded-xl p-4 ring-1 ring-[#2B416B]">
+            <div className="text-xs text-[#A7B8D8] mb-2">Aktif Vardiya</div>
+            <div className="text-3xl font-bold text-[#10B981]">{performanceTeam.filter(p => {
+              const today = new Date().toISOString().split('T')[0];
+              const currentShift = getShiftForPersonnelAndDate(p.name, today);
+              return currentShift === 'Gündüz' || currentShift === 'Akşam';
+            }).length}</div>
+          </div>
+          <div className="bg-[#0E2142]/60 rounded-xl p-4 ring-1 ring-[#2B416B]">
+            <div className="text-xs text-[#A7B8D8] mb-2">Çağrı Skoru</div>
+            <div className="text-3xl font-bold text-[#10B981]">{Math.round(performanceTeam.reduce((sum, p) => sum + (p.callScore || 0), 0) / performanceTeam.length)}</div>
+          </div>
+        </div>
+
+        {/* Bugünkü Vardiya Durumu */}
+        <div className="mt-6 bg-[#0E2142]/40 rounded-xl p-4 ring-1 ring-[#2B416B]">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm font-semibold text-white">📅 Bugünkü Vardiya Durumu</div>
+            <button
+              onClick={() => setShowShiftManagementModal(true)}
+              className="text-xs px-3 py-1.5 rounded-lg bg-[#2E86FF]/20 hover:bg-[#2E86FF]/40 text-[#2E86FF] transition"
+            >
+              Vardiya Düzenle
+            </button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {performanceTeam.map(op => {
+              const today = new Date().toISOString().split('T')[0];
+              const currentShift = getShiftForPersonnelAndDate(op.name, today);
+              const isActive = currentShift === 'Gündüz' || currentShift === 'Akşam';
+              const statusColor = isActive ? '#10B981' : currentShift === 'İzin' ? '#F59E0B' : '#EF4444';
+              
+              return (
+                <div key={op.id} className="bg-[#0E2142]/60 rounded-lg p-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <div className={`w-2 h-2 rounded-full flex-shrink-0`} style={{backgroundColor: statusColor}}></div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-semibold text-white truncate">{op.name}</div>
+                      <div className="text-xs" style={{color: statusColor}}>{currentShift}</div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setSelectedPersonnel(op.name);
+                      setSelectedDate(today);
+                      setShowShiftModal(true);
+                    }}
+                    className="text-xs px-2 py-1 rounded bg-[#2E86FF]/20 hover:bg-[#2E86FF]/40 text-[#2E86FF] transition flex-shrink-0"
+                  >
+                    Değiştir
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
         </div>
       </div>
 
@@ -2679,46 +2874,6 @@ Otomatik Eskalasyon Sistemi
             <div className="text-xs text-[#A7B8D8] mb-1">Son Bildirim</div>
             <div className="text-xs font-bold text-[#10B981]">2 saat önce</div>
           </div>
-        </div>
-        
-        {/* Performance Team için Koordinatör Kartları */}
-        <div className="text-xs text-[#A7B8D8] mb-3">📋 Bildirim Alacak Koordinatörler</div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {performanceTeam.map((coordinator) => (
-            <div 
-              key={coordinator.id}
-              className="bg-[#112544] rounded-lg p-3 ring-1 ring-[#2B416B] hover:ring-[#2E86FF]/50 transition"
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <div 
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
-                  style={{background: `linear-gradient(to br, ${coordinator.color}, ${coordinator.colorHover})`}}
-                >
-                  {coordinator.name.charAt(0)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs font-semibold text-white truncate">{coordinator.name}</div>
-                  <div className="text-xs text-[#A7B8D8] truncate">{coordinator.role}</div>
-                </div>
-              </div>
-              <div className="space-y-1">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-[#A7B8D8]">Sorumlu NM:</span>
-                  <span className="text-white font-semibold">{coordinator.nms.length}</span>
-                </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-[#A7B8D8]">ATM Sayısı:</span>
-                  <span className="text-white font-semibold">{coordinator.atmCount}</span>
-                </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-[#A7B8D8]">Ort. SLA:</span>
-                  <span className={`font-semibold ${coordinator.avgSla <= 2.0 ? 'text-[#10B981]' : coordinator.avgSla <= 2.5 ? 'text-[#F2B705]' : 'text-[#EF4444]'}`}>
-                    {coordinator.avgSla}h
-                  </span>
-                </div>
-              </div>
-            </div>
-          ))}
         </div>
       </div>
 

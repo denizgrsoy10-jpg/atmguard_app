@@ -25,7 +25,7 @@ function LayoutContent({ children }: { children: React.ReactNode }) {
                 <div className="relative">
                   <Image
                     src="/qnb-logo.png"
-                    alt="QNB Finansbank"
+                    alt="QNB Bank"
                     width={60}
                     height={60}
                     className="rounded-xl"

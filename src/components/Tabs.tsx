@@ -16,6 +16,7 @@ export default function Tabs() {
     { href: "/command-center", label: t.nav.commandCenter },
     { href: "/budget-performance", label: "💰 Bütçe & Tasarruf" },
     { href: "/trend-health", label: t.nav.trendHealth },
+    { href: "/esg-impact", label: "🌱 ESG Etki" },
   ];
 
   return (

@@ -5,6 +5,8 @@ import dynamic from "next/dynamic";
 import Image from "next/image";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
+import atmMasterData from "@/data/atm_master.json";
+import { getPriceByKM, getSLMPrice, calculateOperationCosts, formatCurrencyShort, getKMColor } from '@/utils/pricing';
 
 type MetricInfo = {
   title: string;
@@ -163,6 +165,9 @@ export default function CashFlowOpsPage() {
   const [heatMapStartDate, setHeatMapStartDate] = useState<string>("2026-02-01");
   const [heatMapEndDate, setHeatMapEndDate] = useState<string>("2026-02-04");
   const [fullscreenHeatMap, setFullscreenHeatMap] = useState(false);
+  
+  // Otomatik Öneriler collapsible state
+  const [autoSuggestionsExpanded, setAutoSuggestionsExpanded] = useState(false);
 
   // AI Manual Override Rules
   const [manualCashLimit, setManualCashLimit] = useState<string>("350");
@@ -814,11 +819,28 @@ export default function CashFlowOpsPage() {
             </div>
 
             {/* AI Recommendations */}
-            <div className="bg-[#0E2142]/40 rounded-xl p-5 ring-1 ring-[#2B416B]">
-              <div className="flex items-center justify-between mb-4">
-                <div className="text-sm font-semibold text-white">⚡ Otomatik Öneriler (Son 2 Saat)</div>
-                <div className="text-xs text-[#10B981] font-bold">12 yeni öneri</div>
+            <div className="bg-[#0E2142]/40 rounded-xl p-5 ring-1 ring-[#2B416B] transition-all duration-300 hover:ring-[#2E86FF]/50">
+              <div 
+                className="flex items-center justify-between cursor-pointer group"
+                onClick={() => setAutoSuggestionsExpanded(!autoSuggestionsExpanded)}
+              >
+                <div className="flex items-center gap-3 flex-1">
+                  <div className="text-sm font-semibold text-white flex items-center gap-2">
+                    <span className="text-xl">⚡</span>
+                    <span>Otomatik Öneriler (Son 2 Saat)</span>
+                  </div>
+                  <div className="text-xs text-[#10B981] font-bold px-2 py-1 rounded-full bg-[#10B981]/20 animate-pulse">12 yeni öneri</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#2E86FF] to-[#1F6FE0] flex items-center justify-center shadow-lg group-hover:shadow-[#2E86FF]/50 transition-all duration-300 group-hover:scale-110">
+                    <span className={`text-white text-2xl font-bold transition-transform duration-300 ${autoSuggestionsExpanded ? 'rotate-180' : 'rotate-0'}`}>
+                      {autoSuggestionsExpanded ? "−" : "+"}
+                    </span>
+                  </div>
+                </div>
               </div>
+              
+              <div className={`overflow-hidden transition-all duration-500 ease-in-out ${autoSuggestionsExpanded ? 'max-h-[800px] opacity-100 mt-4' : 'max-h-0 opacity-0'}`}>
               <div className="space-y-3 max-h-64 overflow-y-auto">
                 {[
                   { id: 1, type: "collection", atmId: "FA026", atmName: "BATI ATASEHIR SUBE 2", city: "İstanbul", district: "Ataşehir", priority: "high", reason: "Kaset %89 dolu (Cuma öğleden sonra maaş yoğunluğu tahmini)", eta: "18:00", confidence: 96 },
@@ -870,6 +892,7 @@ export default function CashFlowOpsPage() {
                     </div>
                   </div>
                 ))}
+              </div>
               </div>
             </div>
           </>
@@ -2002,6 +2025,12 @@ export default function CashFlowOpsPage() {
           </div>
         </div>
       </div>
+
+      {/* CIT Kayıt Pattern Analizi - Collapsible Card */}
+      <CITPatternAnalysis />
+
+      {/* Planlı vs Plansız İkmal & Para Toplama Trend Chart */}
+      <PlannedUnplannedCashOperationsChart />
 
       {/* Daily/Weekly Cash Flow Table */}
       <div className="bg-[#112544] rounded-2xl p-4 ring-1 ring-[#2B416B]">
@@ -3997,3 +4026,470 @@ const RouteMapComponent = dynamic(
   () => import("./RouteMap"),
   { ssr: false }
 );
+
+// CIT Pattern Analysis Component (Collapsible)
+function CITPatternAnalysis() {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [dateStart, setDateStart] = useState('2025-11-13');
+  const [dateEnd, setDateEnd] = useState('2026-02-11');
+
+  // Gerçek ATM verilerinden top 20 seçiyoruz
+  const topATMs = useMemo(() => {
+    // Rastgele CIT sayıları üret (simülasyon için)
+    const getRandomCount = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
+    
+    // ATM master data'dan ilk 20 aktif ATM'yi al
+    return atmMasterData
+      .filter((atm: any) => atm.active)
+      .slice(0, 20)
+      .map((atm: any) => {
+        const replenishments = getRandomCount(35, 42);
+        const collections = getRandomCount(30, 40);
+        return {
+          id: atm.atm_id,
+          name: atm.atm_name,
+          city: atm.city,
+          district: atm.district,
+          cashCenter: atm.cash_center || 'Merkezi Nakit',
+          replenishments,
+          collections,
+          total: replenishments + collections
+        };
+      })
+      .sort((a: any, b: any) => b.total - a.total); // Toplam sayıya göre sırala
+  }, []);
+
+  // Excel Export Function
+  const exportToExcel = () => {
+    const csvContent = '\uFEFFCIT Kayıt Pattern Analizi\n' +
+      `Tarih Aralığı: ${dateStart} - ${dateEnd}\n\n` +
+      'Sıra,ATM ID,ATM Adı,İl,İlçe,Nakit Merkezi,İkmal Sayısı,Para Toplama Sayısı,Toplam İşlem\n' +
+      topATMs.map((atm, idx) => 
+        `${idx + 1},${atm.id},${atm.name},${atm.city},${atm.district},${atm.cashCenter},${atm.replenishments},${atm.collections},${atm.total}`
+      ).join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `CIT_Pattern_Analysis_${dateStart}_${dateEnd}.csv`;
+    link.click();
+  };
+
+  return (
+    <div className="bg-[#112544] rounded-2xl p-4 ring-1 ring-[#2B416B]">
+      {/* Header - Always Visible */}
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
+        <div 
+          className="flex items-center gap-3 cursor-pointer hover:bg-[#1a2f54] rounded-lg p-2 transition-all flex-1"
+          onClick={() => setIsExpanded(!isExpanded)}
+        >
+          <div className="text-2xl">{isExpanded ? '📂' : '📁'}</div>
+          <div>
+            <div className="text-sm text-white font-semibold">🔄 CIT Kayıt Pattern Analizi</div>
+            <div className="text-xs text-[#A7B8D8] mt-1">
+              En fazla para toplama/ikmal yapılan ATM'ler
+            </div>
+          </div>
+          <div className="text-[#A7B8D8] text-xl transition-transform ml-auto" style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+            ▼
+          </div>
+        </div>
+
+        {/* Date Range and Export Filters */}
+        {isExpanded && (
+          <div className="flex items-center gap-2 flex-wrap w-full">
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={dateStart}
+                onChange={(e) => setDateStart(e.target.value)}
+                max={dateEnd}
+                className="px-2 py-1 text-xs rounded-lg bg-[#0E2142] text-white border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#2E86FF]"
+                onClick={(e) => e.stopPropagation()}
+              />
+              <span className="text-white/50 text-xs">-</span>
+              <input
+                type="date"
+                value={dateEnd}
+                onChange={(e) => setDateEnd(e.target.value)}
+                min={dateStart}
+                max="2026-02-12"
+                className="px-2 py-1 text-xs rounded-lg bg-[#0E2142] text-white border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#2E86FF]"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+            <div className="px-3 py-1.5 rounded-lg bg-[#2E86FF]/20 text-[#2E86FF] text-xs font-semibold">
+              Top 20 ATM
+            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                exportToExcel();
+              }}
+              className="px-3 py-1.5 rounded-lg bg-[#10B981]/20 text-[#10B981] hover:bg-[#10B981]/30 text-xs font-semibold transition-all flex items-center gap-1"
+            >
+              📥 Excel Export
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Expandable Content */}
+      {isExpanded && (
+        <div className="mt-4 space-y-2 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
+          {/* Custom Scrollbar Styles */}
+          <style jsx>{`
+            .custom-scrollbar::-webkit-scrollbar {
+              width: 8px;
+            }
+            .custom-scrollbar::-webkit-scrollbar-track {
+              background: #0E2142;
+              border-radius: 4px;
+            }
+            .custom-scrollbar::-webkit-scrollbar-thumb {
+              background: #2E86FF;
+              border-radius: 4px;
+            }
+            .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+              background: #0066FF;
+            }
+          `}</style>
+
+          {/* Table Header */}
+          <div className="grid grid-cols-12 gap-2 px-4 py-2 bg-[#0E2142]/60 rounded-lg text-xs font-semibold text-[#A7B8D8]">
+            <div className="col-span-1">#</div>
+            <div className="col-span-2">ATM ID</div>
+            <div className="col-span-2">ATM Adı</div>
+            <div className="col-span-1">İl</div>
+            <div className="col-span-2">İlçe</div>
+            <div className="col-span-2">Nakit Merkezi</div>
+            <div className="col-span-1 text-center">İkmal</div>
+            <div className="col-span-1 text-center">Toplama</div>
+          </div>
+
+          {/* Table Rows */}
+          {topATMs.map((atm, idx) => (
+            <div 
+              key={atm.id}
+              className="grid grid-cols-12 gap-2 px-4 py-3 bg-[#0E2142]/40 hover:bg-[#0E2142]/80 rounded-lg text-xs text-white transition-all cursor-pointer ring-1 ring-[#2B416B] hover:ring-[#2E86FF]/50"
+            >
+              <div className="col-span-1 flex items-center">
+                <div className={`px-2 py-1 rounded text-[10px] font-bold ${
+                  idx < 3 ? 'bg-[#EF4444]/20 text-[#EF4444]' : 
+                  idx < 10 ? 'bg-[#F59E0B]/20 text-[#F59E0B]' : 
+                  'bg-[#10B981]/20 text-[#10B981]'
+                }`}>
+                  #{idx + 1}
+                </div>
+              </div>
+              <div className="col-span-2 flex items-center font-semibold text-[#2E86FF]">{atm.id}</div>
+              <div className="col-span-2 flex items-center text-white">{atm.name}</div>
+              <div className="col-span-1 flex items-center text-[#A7B8D8]">{atm.city}</div>
+              <div className="col-span-2 flex items-center text-[#A7B8D8]">{atm.district}</div>
+              <div className="col-span-2 flex items-center text-[#A7B8D8] text-[10px]">{atm.cashCenter}</div>
+              <div className="col-span-1 flex items-center justify-center">
+                <div className="px-2 py-1 rounded bg-[#10B981]/20 text-[#10B981] font-bold text-xs">
+                  {atm.replenishments}
+                </div>
+              </div>
+              <div className="col-span-1 flex items-center justify-center">
+                <div className="px-2 py-1 rounded bg-[#F59E0B]/20 text-[#F59E0B] font-bold text-xs">
+                  {atm.collections}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Planlı vs Plansız İkmal & Para Toplama Trend Chart Component (Collapsible)
+function PlannedUnplannedCashOperationsChart() {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [dateStart, setDateStart] = useState('2025-01-01');
+  const [dateEnd, setDateEnd] = useState('2025-12-31');
+  const [selectedTab, setSelectedTab] = useState<'ikmal' | 'toplama'>('ikmal');
+
+  // Mock data - Son 12 ay için planlı/plansız ikmal ve para toplama sayıları
+  const operationsData = [
+    { month: 'Oca 2025', plannedRepl: 42, unplannedRepl: 18, plannedColl: 35, unplannedColl: 12 },
+    { month: 'Şub 2025', plannedRepl: 48, unplannedRepl: 22, plannedColl: 38, unplannedColl: 15 },
+    { month: 'Mar 2025', plannedRepl: 45, unplannedRepl: 15, plannedColl: 40, unplannedColl: 10 },
+    { month: 'Nis 2025', plannedRepl: 52, unplannedRepl: 28, plannedColl: 42, unplannedColl: 18 },
+    { month: 'May 2025', plannedRepl: 50, unplannedRepl: 20, plannedColl: 44, unplannedColl: 14 },
+    { month: 'Haz 2025', plannedRepl: 38, unplannedRepl: 32, plannedColl: 36, unplannedColl: 22 },
+    { month: 'Tem 2025', plannedRepl: 55, unplannedRepl: 25, plannedColl: 48, unplannedColl: 16 },
+    { month: 'Ağu 2025', plannedRepl: 58, unplannedRepl: 18, plannedColl: 50, unplannedColl: 12 },
+    { month: 'Eyl 2025', plannedRepl: 46, unplannedRepl: 24, plannedColl: 41, unplannedColl: 17 },
+    { month: 'Eki 2025', plannedRepl: 43, unplannedRepl: 30, plannedColl: 38, unplannedColl: 20 },
+    { month: 'Kas 2025', plannedRepl: 60, unplannedRepl: 35, plannedColl: 52, unplannedColl: 25 },
+    { month: 'Ara 2025', plannedRepl: 62, unplannedRepl: 22, plannedColl: 55, unplannedColl: 14 },
+  ];
+
+  const maxValueRepl = Math.max(...operationsData.map(d => Math.max(d.plannedRepl, d.unplannedRepl)));
+  const maxValueColl = Math.max(...operationsData.map(d => Math.max(d.plannedColl, d.unplannedColl)));
+  const totalPlannedRepl = operationsData.reduce((sum, d) => sum + d.plannedRepl, 0);
+  const totalUnplannedRepl = operationsData.reduce((sum, d) => sum + d.unplannedRepl, 0);
+  const totalPlannedColl = operationsData.reduce((sum, d) => sum + d.plannedColl, 0);
+  const totalUnplannedColl = operationsData.reduce((sum, d) => sum + d.unplannedColl, 0);
+
+  // Excel Export Function
+  const exportToExcel = () => {
+    const csvContent = '\uFEFFPlanlı vs Plansız İkmal & Para Toplama Trendi\n' +
+      `Tarih Aralığı: ${dateStart} - ${dateEnd}\n\n` +
+      'Ay,Planlı İkmal,Plansız İkmal,Planlı Para Toplama,Plansız Para Toplama\n' +
+      operationsData.map((data) => 
+        `${data.month},${data.plannedRepl},${data.unplannedRepl},${data.plannedColl},${data.unplannedColl}`
+      ).join('\n') +
+      `\n\nTOPLAM,${totalPlannedRepl},${totalUnplannedRepl},${totalPlannedColl},${totalUnplannedColl}\n` +
+      `\nPlansız İkmal Oranı,%${((totalUnplannedRepl / (totalPlannedRepl + totalUnplannedRepl)) * 100).toFixed(1)}\n` +
+      `Plansız Para Toplama Oranı,%${((totalUnplannedColl / (totalPlannedColl + totalUnplannedColl)) * 100).toFixed(1)}`;
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `Planned_Unplanned_Cash_Operations_${dateStart}_${dateEnd}.csv`;
+    link.click();
+  };
+
+  return (
+    <div className="bg-[#112544] rounded-2xl p-4 ring-1 ring-[#2B416B] mt-4">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
+        <div 
+          className="flex items-center gap-3 cursor-pointer hover:bg-[#1a2f54] rounded-lg p-2 transition-all flex-1"
+          onClick={() => setIsExpanded(!isExpanded)}
+        >
+          <div className="text-2xl">{isExpanded ? '📊' : '📈'}</div>
+          <div>
+            <div className="text-sm text-white font-semibold">💰 Planlı vs Plansız Nakit Operasyonları</div>
+            <div className="text-xs text-[#A7B8D8] mt-1">
+              İkmal ve Para Toplama operasyonları karşılaştırması
+            </div>
+          </div>
+          <div className="text-[#A7B8D8] text-xl transition-transform ml-auto" style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+            ▼
+          </div>
+        </div>
+
+        {/* Stats Preview (Always Visible) */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-3 rounded bg-[#10B981]"></div>
+            <span className="text-xs text-[#A7B8D8]">İkmal: {totalPlannedRepl + totalUnplannedRepl}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-3 rounded bg-[#F59E0B]"></div>
+            <span className="text-xs text-[#A7B8D8]">Toplama: {totalPlannedColl + totalUnplannedColl}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Date Range and Export Filters - Show when expanded */}
+      {isExpanded && (
+        <div className="flex items-center gap-2 flex-wrap mb-3 px-2">
+          {/* Tab Selection */}
+          <div className="flex items-center gap-1 mr-3">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedTab('ikmal');
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                selectedTab === 'ikmal'
+                  ? 'bg-[#10B981] text-white'
+                  : 'bg-[#0E2142] text-[#A7B8D8] hover:bg-[#1a2f54]'
+              }`}
+            >
+              📦 İkmal
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedTab('toplama');
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                selectedTab === 'toplama'
+                  ? 'bg-[#F59E0B] text-white'
+                  : 'bg-[#0E2142] text-[#A7B8D8] hover:bg-[#1a2f54]'
+              }`}
+            >
+              💵 Para Toplama
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={dateStart}
+              onChange={(e) => setDateStart(e.target.value)}
+              max={dateEnd}
+              className="px-2 py-1 text-xs rounded-lg bg-[#0E2142] text-white border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#2E86FF]"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <span className="text-white/50 text-xs">-</span>
+            <input
+              type="date"
+              value={dateEnd}
+              onChange={(e) => setDateEnd(e.target.value)}
+              min={dateStart}
+              max="2026-02-12"
+              className="px-2 py-1 text-xs rounded-lg bg-[#0E2142] text-white border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#2E86FF]"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              exportToExcel();
+            }}
+            className="px-3 py-1.5 rounded-lg bg-[#10B981]/20 text-[#10B981] hover:bg-[#10B981]/30 text-xs font-semibold transition-all flex items-center gap-1"
+          >
+            📥 Excel Export
+          </button>
+        </div>
+      )}
+
+      {/* Expandable Chart Content */}
+      {isExpanded && (
+        <div className="mt-4">
+          {/* Single Chart - İkmal or Para Toplama based on selectedTab */}
+          <div className="bg-[#0E2142]/40 rounded-xl p-4">
+            <div className="text-sm font-semibold text-white mb-3">
+              {selectedTab === 'ikmal' ? '📦 İkmal Operasyonları' : '💵 Para Toplama Operasyonları'}
+            </div>
+            <div className="flex gap-2">
+              {operationsData.map((data, idx) => {
+                const maxValue = selectedTab === 'ikmal' ? maxValueRepl : maxValueColl;
+                const plannedValue = selectedTab === 'ikmal' ? data.plannedRepl : data.plannedColl;
+                const unplannedValue = selectedTab === 'ikmal' ? data.unplannedRepl : data.unplannedColl;
+                const plannedColor = selectedTab === 'ikmal' ? { from: '#10B981', to: '#059669' } : { from: '#F59E0B', to: '#F97316' };
+                const unplannedColor = selectedTab === 'ikmal' ? { from: '#EF4444', to: '#DC2626' } : { from: '#8B5CF6', to: '#7C3AED' };
+
+                return (
+                  <div key={idx} className="flex-1 flex flex-col items-center gap-2">
+                    <div className="w-full flex items-end justify-center gap-1" style={{ height: '180px' }}>
+                      {/* Planned Bar */}
+                      <div className="relative flex flex-col items-center justify-end flex-1 group">
+                        <div 
+                          className="w-full rounded-t transition-all hover:opacity-80"
+                          style={{ 
+                            height: `${(plannedValue / maxValue) * 100}%`, 
+                            minHeight: '15px',
+                            background: `linear-gradient(to top, ${plannedColor.from}, ${plannedColor.to})`
+                          }}
+                        >
+                          <div className="absolute -top-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="text-white text-[10px] px-2 py-1 rounded whitespace-nowrap font-semibold" style={{ backgroundColor: plannedColor.from }}>
+                              {plannedValue}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Unplanned Bar */}
+                      <div className="relative flex flex-col items-center justify-end flex-1 group">
+                        <div 
+                          className="w-full rounded-t transition-all hover:opacity-80"
+                          style={{ 
+                            height: `${(unplannedValue / maxValue) * 100}%`, 
+                            minHeight: '15px',
+                            background: `linear-gradient(to top, ${unplannedColor.from}, ${unplannedColor.to})`
+                          }}
+                        >
+                          <div className="absolute -top-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="text-white text-[10px] px-2 py-1 rounded whitespace-nowrap font-semibold" style={{ backgroundColor: unplannedColor.from }}>
+                              {unplannedValue}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="text-[10px] text-[#A7B8D8] font-semibold text-center">
+                      {data.month}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Legend & Stats */}
+            <div className="mt-6 pt-4 border-t border-[#2B416B] grid grid-cols-2 gap-4">
+              {selectedTab === 'ikmal' ? (
+                <>
+                  <div className="bg-[#10B981]/10 rounded-lg p-3 border border-[#10B981]/30">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-3 h-3 rounded bg-[#10B981]"></div>
+                      <span className="text-xs font-semibold text-white">Planlı İkmal</span>
+                    </div>
+                    <div className="text-2xl font-bold text-[#10B981]">{totalPlannedRepl}</div>
+                    <div className="text-xs text-[#A7B8D8] mt-1">Toplam (12 Ay)</div>
+                  </div>
+                  
+                  <div className="bg-[#EF4444]/10 rounded-lg p-3 border border-[#EF4444]/30">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-3 h-3 rounded bg-[#EF4444]"></div>
+                      <span className="text-xs font-semibold text-white">Plansız İkmal</span>
+                    </div>
+                    <div className="text-2xl font-bold text-[#EF4444]">{totalUnplannedRepl}</div>
+                    <div className="text-xs text-[#A7B8D8] mt-1">Toplam (12 Ay)</div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="bg-[#F59E0B]/10 rounded-lg p-3 border border-[#F59E0B]/30">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-3 h-3 rounded bg-[#F59E0B]"></div>
+                      <span className="text-xs font-semibold text-white">Planlı Toplama</span>
+                    </div>
+                    <div className="text-2xl font-bold text-[#F59E0B]">{totalPlannedColl}</div>
+                    <div className="text-xs text-[#A7B8D8] mt-1">Toplam (12 Ay)</div>
+                  </div>
+                  
+                  <div className="bg-[#8B5CF6]/10 rounded-lg p-3 border border-[#8B5CF6]/30">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-3 h-3 rounded bg-[#8B5CF6]"></div>
+                      <span className="text-xs font-semibold text-white">Plansız Toplama</span>
+                    </div>
+                    <div className="text-2xl font-bold text-[#8B5CF6]">{totalUnplannedColl}</div>
+                    <div className="text-xs text-[#A7B8D8] mt-1">Toplam (12 Ay)</div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* AI Insight */}
+          <div className="mt-4 bg-purple-500/10 border border-purple-500/30 rounded-xl p-3">
+            <div className="flex items-start gap-2">
+              <div className="text-xl">🤖</div>
+              <div className="flex-1">
+                <div className="text-xs font-semibold text-purple-400 mb-1">AI Recommendation</div>
+                <div className="text-xs text-[#A7B8D8] leading-relaxed">
+                  {selectedTab === 'ikmal' ? (
+                    <>
+                      Plansız ikmal oranı <strong className="text-[#EF4444]">%{((totalUnplannedRepl / (totalPlannedRepl + totalUnplannedRepl)) * 100).toFixed(1)}</strong>. 
+                      <strong className="text-white"> İdeal hedef %20'nin altında olmalı.</strong> Özellikle Haziran ve Kasım aylarında 
+                      plansız ikmal sayıları artış gösteriyor. <strong className="text-[#10B981]">AI tahmin modelini optimize ederek</strong> plansız ikmalleri 
+                      %30-40 azaltabilir, CIT maliyetlerini düşürebilirsiniz.
+                    </>
+                  ) : (
+                    <>
+                      Plansız para toplama oranı <strong className="text-[#8B5CF6]">%{((totalUnplannedColl / (totalPlannedColl + totalUnplannedColl)) * 100).toFixed(1)}</strong>. 
+                      <strong className="text-white"> İdeal hedef %20'nin altında olmalı.</strong> Özellikle Haziran ve Kasım aylarında 
+                      plansız para toplama sayıları artış gösteriyor. <strong className="text-[#F59E0B]">Nakit seviye tahminlerini iyileştirerek</strong> plansız 
+                      toplama operasyonlarını %25-35 azaltabilir, operasyonel verimliliği artırabilirsiniz.
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
