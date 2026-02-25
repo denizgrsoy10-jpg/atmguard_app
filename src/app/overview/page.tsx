@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import KpiRow from "@/components/KpiRow";
@@ -342,7 +342,10 @@ export default function OverviewPage() {
   const [vendorLogTab, setVendorLogTab] = useState<'all' | 'cashin' | 'dispense' | 'errors'>('all');
   const [vendorLogPage, setVendorLogPage] = useState(0);
   const VENDOR_LOG_PAGE_SIZE = 10;
-  
+  const [brmLogData, setBrmLogData] = useState<any>(null);
+  const [brmLogError, setBrmLogError] = useState<string | null>(null);
+  const brmFileRef = useRef<HTMLInputElement>(null);
+
   // Top 10 Risky ATMs tarih aralığı
   const [top10StartDate, setTop10StartDate] = useState(() => {
     const date = new Date();
@@ -487,89 +490,98 @@ export default function OverviewPage() {
     });
   };
 
-  // ── BRM Log Demo Data ──
-  const BRM_DEMO_LOG = {
-    atm_id: 'HWBRMSAE410019P1', log_date: '2026-02-23', source_file: 'BRM260223.txt',
-    health_score: 73, cashin_count: 78, dispense_count: 82, error_count: 12,
-    total_cashin_try: 843200, total_dispense_try: 452500, net_flow_try: 390700,
-    total_rejected_notes: 64, peak_hour: 18,
-    transactions: [
-      { ts: '00:28', op: 'cashin',   amount: 600,    notes: { '200': 3 },              rejected: 0, ok: true },
-      { ts: '01:23', op: 'dispense', amount: 2300,   notes: { '100': 1, '200': 11 },   rejected: 0, ok: true },
-      { ts: '01:39', op: 'dispense', amount: 3000,   notes: { '200': 15 },             rejected: 0, ok: true },
-      { ts: '02:34', op: 'cashin',   amount: 2500,   notes: { '100': 1, '200': 12 },   rejected: 0, ok: true },
-      { ts: '02:39', op: 'cashin',   amount: 2000,   notes: { '100': 2, '200': 9 },    rejected: 0, ok: true },
-      { ts: '06:39', op: 'cashin',   amount: 10000,  notes: { '200': 50 },             rejected: 0, ok: true },
-      { ts: '07:00', op: 'dispense', amount: 2000,   notes: { '200': 10 },             rejected: 0, ok: true },
-      { ts: '07:52', op: 'cashin',   amount: 32000,  notes: { '200': 160 },            rejected: 0, ok: true },
-      { ts: '07:54', op: 'cashin',   amount: 12700,  notes: { '100': 14, '200': 57 },  rejected: 3, ok: true },
-      { ts: '08:13', op: 'cashin',   amount: 4800,   notes: { '100': 4, '200': 20 },   rejected: 0, ok: true },
-      { ts: '08:41', op: 'dispense', amount: 5200,   notes: { '100': 2, '200': 24 },   rejected: 0, ok: true },
-      { ts: '09:12', op: 'cashin',   amount: 18600,  notes: { '100': 8, '200': 85 },   rejected: 2, ok: true },
-      { ts: '09:29', op: 'cashin',   amount: 0,      notes: {},                        rejected: 0, ok: false, error: '5F0000D', errorDesc: 'Banknot doğrulama hatası' },
-      { ts: '09:45', op: 'dispense', amount: 8400,   notes: { '100': 4, '200': 38 },   rejected: 0, ok: true },
-      { ts: '10:03', op: 'cashin',   amount: 12200,  notes: { '200': 61 },             rejected: 4, ok: true },
-      { ts: '10:38', op: 'dispense', amount: 9800,   notes: { '100': 4, '200': 44 },   rejected: 0, ok: true },
-      { ts: '11:07', op: 'cashin',   amount: 0,      notes: {},                        rejected: 0, ok: false, error: '5F0000D', errorDesc: 'Banknot doğrulama hatası' },
-      { ts: '11:22', op: 'cashin',   amount: 28400,  notes: { '100': 12, '200': 130 }, rejected: 7, ok: true },
-      { ts: '11:51', op: 'dispense', amount: 7600,   notes: { '200': 38 },             rejected: 0, ok: true },
-      { ts: '13:02', op: 'cashin',   amount: 24600,  notes: { '100': 6, '200': 114 },  rejected: 8, ok: true },
-      { ts: '13:32', op: 'cashin',   amount: 0,      notes: {},                        rejected: 0, ok: false, error: '5678022', errorDesc: 'Shutter/transport sıkışması' },
-      { ts: '13:48', op: 'dispense', amount: 11200,  notes: { '100': 6, '200': 50 },   rejected: 0, ok: true },
-      { ts: '14:02', op: 'dispense', amount: 4000,   notes: { '100': 20 },             rejected: 0, ok: true },
-      { ts: '14:21', op: 'cashin',   amount: 15400,  notes: { '100': 4, '200': 70 },   rejected: 5, ok: true },
-      { ts: '15:14', op: 'cashin',   amount: 21000,  notes: { '200': 105 },            rejected: 6, ok: true },
-      { ts: '15:44', op: 'dispense', amount: 16200,  notes: { '100': 2, '200': 76 },   rejected: 0, ok: true },
-      { ts: '16:08', op: 'cashin',   amount: 18400,  notes: { '100': 2, '200': 85 },   rejected: 3, ok: true },
-      { ts: '16:33', op: 'dispense', amount: 5500,   notes: { '200': 27, '100': 1 },   rejected: 0, ok: true },
-      { ts: '17:14', op: 'cashin',   amount: 0,      notes: {},                        rejected: 0, ok: false, error: '5F00130', errorDesc: 'Banknot doğrulama / sensör hatası' },
-      { ts: '17:31', op: 'cashin',   amount: 34200,  notes: { '100': 11, '200': 156 }, rejected: 9, ok: true },
-      { ts: '17:41', op: 'cashin',   amount: 0,      notes: {},                        rejected: 0, ok: false, error: '5F0000D', errorDesc: 'Banknot doğrulama hatası' },
-      { ts: '17:55', op: 'dispense', amount: 14300,  notes: { '100': 3, '200': 66 },   rejected: 0, ok: true },
-      { ts: '18:12', op: 'cashin',   amount: 41200,  notes: { '100': 6, '200': 193 },  rejected: 11, ok: true },
-      { ts: '18:44', op: 'dispense', amount: 19800,  notes: { '100': 4, '200': 91 },   rejected: 0, ok: true },
-      { ts: '19:10', op: 'cashin',   amount: 14600,  notes: { '200': 73 },             rejected: 3, ok: true },
-      { ts: '19:38', op: 'dispense', amount: 7200,   notes: { '200': 36 },             rejected: 0, ok: true },
-      { ts: '20:04', op: 'cashin',   amount: 52200,  notes: { '100': 11, '200': 240 }, rejected: 5, ok: true },
-      { ts: '20:34', op: 'dispense', amount: 18600,  notes: { '100': 3, '200': 87 },   rejected: 0, ok: true },
-      { ts: '21:08', op: 'cashin',   amount: 39600,  notes: { '100': 1, '200': 196 },  rejected: 1, ok: true },
-      { ts: '21:11', op: 'cashin',   amount: 0,      notes: {},                        rejected: 0, ok: false, error: '564FFF2', errorDesc: 'CashIn End hatası (işlem tamamlanamadı)' },
-      { ts: '21:12', op: 'dispense', amount: 14200,  notes: { '100': 1, '200': 66 },   rejected: 0, ok: true },
-    ] as Array<{ ts: string; op: 'cashin' | 'dispense'; amount: number; notes: Record<string, number>; rejected: number; ok: boolean; error?: string; errorDesc?: string }>,
-    errors: [
-      { time: '09:29', cmd: 'WFS_CMD_CIM_CASH_IN',     code: '5F0000D', desc: 'Banknot doğrulama hatası (uygunsuz/şüpheli banknot)',   severity: 'medium' },
-      { time: '11:07', cmd: 'WFS_CMD_CIM_CASH_IN',     code: '5F0000D', desc: 'Banknot doğrulama hatası (uygunsuz/şüpheli banknot)',   severity: 'medium' },
-      { time: '13:32', cmd: 'WFS_CMD_CIM_CASH_IN_END', code: '5678022', desc: 'Shutter / transport sıkışması (Jam)',                   severity: 'high' },
-      { time: '13:32', cmd: 'WFS_CMD_CIM_RETRACT',     code: '5720000', desc: 'Retract hatası (banknot yutma motoru)',                 severity: 'high' },
-      { time: '14:02', cmd: 'WFS_CMD_CDM_RESET',       code: '5720000', desc: 'Retract hatası (banknot yutma motoru)',                 severity: 'high' },
-      { time: '17:14', cmd: 'WFS_CMD_CIM_CASH_IN',     code: '5F00130', desc: 'Banknot sensör / validasyon hatası',                   severity: 'medium' },
-      { time: '17:41', cmd: 'WFS_CMD_CIM_CASH_IN',     code: '5F0000D', desc: 'Banknot doğrulama hatası (uygunsuz/şüpheli banknot)',   severity: 'medium' },
-      { time: '21:08', cmd: 'WFS_CMD_CIM_CASH_IN_END', code: '5678022', desc: 'Shutter / transport sıkışması (Jam)',                   severity: 'high' },
-      { time: '21:11', cmd: 'WFS_CMD_CIM_CASH_IN_END', code: '564FFF2', desc: 'CashIn End hatası (işlem tamamlanamadı)',               severity: 'critical' },
-      { time: '21:11', cmd: 'WFS_CMD_CIM_RETRACT',     code: '5720000', desc: 'Retract hatası (banknot yutma motoru)',                 severity: 'high' },
-      { time: '21:12', cmd: 'WFS_CMD_CIM_RESET',       code: '5720000', desc: 'Retract hatası (banknot yutma motoru)',                 severity: 'high' },
-    ] as Array<{ time: string; cmd: string; code: string; desc: string; severity: 'critical' | 'high' | 'medium' }>,
-    hourly: [
-      { h: '00', ci: 600,    di: 0 },     { h: '01', ci: 0,     di: 5300 },
-      { h: '02', ci: 4500,   di: 0 },     { h: '06', ci: 10000, di: 0 },
-      { h: '07', ci: 44800,  di: 2000 },  { h: '08', ci: 10200, di: 40900 },
-      { h: '09', ci: 79600,  di: 17000 }, { h: '10', ci: 33200, di: 29200 },
-      { h: '11', ci: 79500,  di: 7600 },  { h: '12', ci: 3000,  di: 18200 },
-      { h: '13', ci: 65800,  di: 49800 }, { h: '14', ci: 33100, di: 15200 },
-      { h: '15', ci: 49000,  di: 82000 }, { h: '16', ci: 57500, di: 5500 },
-      { h: '17', ci: 81500,  di: 14300 }, { h: '18', ci: 78600, di: 103100 },
-      { h: '19', ci: 30000,  di: 7200 },  { h: '20', ci: 123100, di: 41000 },
-      { h: '21', ci: 59200,  di: 14200 },
-    ],
+  // ── Express Log Analyzer: File Upload + Dynamic Parse ──
+  const handleBrmUpload = async (file: File) => {
+    setVendorLogLoading(true);
+    setBrmLogError(null);
+    setVendorLogSimulated(false);
+    setBrmLogData(null);
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const res = await fetch('/api/brm-log', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Analiz başarısız');
+      setBrmLogData(data);
+      setVendorLogSimulated(true);
+      setVendorLogTab('all');
+      setVendorLogPage(0);
+    } catch (e: any) {
+      setBrmLogError(e.message || 'Bilinmeyen hata');
+    } finally {
+      setVendorLogLoading(false);
+    }
   };
 
-  const BRM_BRAIN_FAULTS = [
-    { id: 'RETRACT_MOTOR', severity: 'critical' as const, icon: '⚙️', title: 'Retract Motor Arızası',       count: 4, pattern: '4× 5720000 hatası (13:32, 14:02, 21:11, 21:12)', impact: 'Banknot geri alma mekanizması defalarca hata verdi. Mekanik aşınma veya yabancı cisim riski.',                                   action: 'ACİL BAKIM — Motor kontrol + temizlik gerekli',              urgency: 95 },
-    { id: 'SHUTTER_JAM',   severity: 'high'     as const, icon: '🚪', title: 'Shutter / Sıkışma Riski',    count: 2, pattern: '2× 5678022 (13:32 ve 21:08)',                        impact: 'Transport şeridi iki kez sıkıştı. 21:08\'daki olay CashIn End hatasına yol açtı.',                                              action: 'Transport belt + shutter fiziksel inspeksiyonu',             urgency: 78 },
-    { id: 'VALIDATOR',     severity: 'high'     as const, icon: '🔍', title: 'Banknot Okuyucu Bozulma',    count: 4, pattern: '3× 5F0000D + 1× 5F00130 (09:29, 11:07, 17:14, 17:41)', impact: '64 banknot reddedildi (%7.6 red oranı). Sensör kirliliği veya kalibrasyon bozulması.',                                         action: 'Banknot okuyucu temizliği + sensor kalibrasyon kontrolü',    urgency: 72 },
-    { id: 'CASHIN_END',    severity: 'high'     as const, icon: '❌', title: 'İşlem Kesintisi (CashIn)',   count: 1, pattern: '21:11 → 564FFF2 → RETRACT → RESET zinciri',          impact: 'Para yatırma işlemi eksik kapandı. Banknot havada kaldı, retract başarısız, CIM reset gerekti.',                                 action: '21:11 işlemi müşteri kaydıyla mutabık edilmeli',             urgency: 88 },
-    { id: 'CASH_OVERFLOW', severity: 'medium'   as const, icon: '💰', title: 'Nakit Taşma Riski',          count: 0, pattern: 'Net akış: +₺390,700 (CashIn > Dispense)',             impact: 'Gün boyunca ATM\'ye ₺843,200 girdi, ₺452,500 çıktı. Kasetteki nakit kritik seviyede.',                                          action: 'Yarın öncelikli TOPLAMA planlanmalı',                        urgency: 55 },
-  ];
+  // Normalize parser output → UI shape (same field names as old BRM_DEMO_LOG)
+  const brmLog = brmLogData ? (() => {
+    const normNotes = (raw: Record<string,number>) => {
+      const out: Record<string,number> = {};
+      for (const [k,v] of Object.entries(raw)) {
+        const key = k.replace(/^[no]/,'');
+        if (/^\d+$/.test(key) && key !== '0') out[key] = Number(v);
+      }
+      return out;
+    };
+    const txns: Array<{ts:string;op:'cashin'|'dispense';amount:number;notes:Record<string,number>;rejected:number;ok:boolean;error?:string;errorDesc?:string}> = [];
+    for (const s of (brmLogData.cashin_sessions || [])) {
+      const t = s.timestamp ? String(s.timestamp).substring(11,16) : '--:--';
+      txns.push({ ts:t, op:'cashin', amount:s.amount_try, notes:normNotes(s.notes||{}), rejected:s.rejected_count, ok:true });
+    }
+    for (const d of (brmLogData.dispense_transactions || [])) {
+      const t = d.timestamp ? String(d.timestamp).substring(11,16) : '--:--';
+      txns.push({ ts:t, op:'dispense', amount:d.amount_try, notes:normNotes(d.notes||{}), rejected:d.rejected_count, ok:true });
+    }
+    for (const e of (brmLogData.errors || [])) {
+      const t = e.timestamp ? String(e.timestamp).substring(11,16) : '--:--';
+      const op = String(e.command||'').includes('DISPENSE') ? 'dispense' : 'cashin';
+      txns.push({ ts:t, op, amount:0, notes:{}, rejected:0, ok:false, error:e.error_code, errorDesc:e.description });
+    }
+    txns.sort((a,b) => a.ts.localeCompare(b.ts));
+    const hourly: Array<{h:string;ci:number;di:number}> = [];
+    const vols = brmLogData.hourly_volumes || {};
+    for (let h = 0; h < 24; h++) {
+      const v = vols[String(h)] || {cashin:0,dispense:0};
+      if (v.cashin > 0 || v.dispense > 0) hourly.push({ h:String(h).padStart(2,'0'), ci:v.cashin, di:v.dispense });
+    }
+    return {
+      atm_id:               brmLogData.atm_id,
+      log_date:             brmLogData.log_date,
+      source_file:          brmLogData.source_file,
+      health_score:         brmLogData.health_score,
+      cashin_count:         brmLogData.cashin_count,
+      dispense_count:       brmLogData.dispense_count,
+      error_count:          brmLogData.error_count,
+      total_cashin_try:     brmLogData.total_cashin_try,
+      total_dispense_try:   brmLogData.total_dispense_try,
+      net_flow_try:         brmLogData.net_flow_try,
+      total_rejected_notes: brmLogData.total_rejected_notes,
+      transactions: txns,
+      hourly,
+    };
+  })() : null;
+
+  const brmFaults = brmLog ? (() => {
+    const raw = brmLogData.errors || [];
+    const byCode: Record<string,any[]> = {};
+    for (const e of raw) { if (!byCode[e.error_code]) byCode[e.error_code]=[]; byCode[e.error_code].push(e); }
+    const ts = (e:any) => e.timestamp ? String(e.timestamp).substring(11,16) : '--:--';
+    type FS = 'critical'|'high'|'medium';
+    const faults: Array<{id:string;severity:FS;icon:string;title:string;count:number;pattern:string;impact:string;action:string;urgency:number}> = [];
+    const r = byCode['5720000']||[];
+    if (r.length) faults.push({ id:'RETRACT_MOTOR', severity:'critical', icon:'⚙️', title:'Retract Motor Arızası', count:r.length, pattern:`${r.length}× 5720000 (${r.map(ts).join(', ')})`, impact:'Banknot geri alma mekanizması hata verdi. Mekanik aşınma veya yabancı cisim riski.', action:'ACİL BAKIM — Motor kontrol + temizlik gerekli', urgency:95 });
+    const sh = byCode['5678022']||[];
+    if (sh.length) faults.push({ id:'SHUTTER_JAM', severity:'high', icon:'🚪', title:'Shutter / Sıkışma Riski', count:sh.length, pattern:`${sh.length}× 5678022 (${sh.map(ts).join(', ')})`, impact:'Transport şeridi sıkıştı. CashIn End hatasına yol açma riski.', action:'Transport belt + shutter fiziksel inspeksiyonu', urgency:78 });
+    const vl = [...(byCode['5F0000D']||[]), ...(byCode['5F00130']||[])];
+    if (vl.length) faults.push({ id:'VALIDATOR', severity:'high', icon:'🔍', title:'Banknot Okuyucu Bozulma', count:vl.length, pattern:`${vl.length}× validator hatası (${vl.map(ts).join(', ')})`, impact:`${brmLog.total_rejected_notes} banknot reddedildi. Sensör kirliliği veya kalibrasyon bozulması.`, action:'Banknot okuyucu temizliği + sensor kalibrasyon kontrolü', urgency:72 });
+    const cf = byCode['564FFF2']||[];
+    if (cf.length) faults.push({ id:'CASHIN_END', severity:'high', icon:'❌', title:'İşlem Kesintisi (CashIn End)', count:cf.length, pattern:`${cf.length}× 564FFF2 (${cf.map(ts).join(', ')})`, impact:'Para yatırma işlemi eksik kapandı. Müşteri kaydıyla mutabakat gerekebilir.', action:'İlgili işlemler müşteri kaydıyla mutabık edilmeli', urgency:88 });
+    const known = new Set(['5720000','5678022','5F0000D','5F00130','564FFF2']);
+    const other = raw.filter((e:any)=>!known.has(e.error_code));
+    if (other.length) faults.push({ id:'OTHER', severity:'medium', icon:'⚠️', title:'Diğer Hata Kodları', count:other.length, pattern:[...new Set(other.map((e:any)=>e.error_code))].join(', '), impact:'Bilinmeyen hata kodları. Detaylı inceleme önerilir.', action:'Teknik servis ile kontrol edilmeli', urgency:50 });
+    if (brmLog.net_flow_try > 0) faults.push({ id:'CASH_OVERFLOW', severity:'medium', icon:'💰', title:'Nakit Taşma Riski', count:0, pattern:`Net akış: +₺${(brmLog.net_flow_try/1000).toFixed(0)}K`, impact:`ATM'ye ₺${(brmLog.total_cashin_try/1000).toFixed(0)}K girdi, ₺${(brmLog.total_dispense_try/1000).toFixed(0)}K çıktı.`, action:'Yakın vadede toplama operasyonu planlanmalı', urgency:55 });
+    return faults;
+  })() : [];
 
   return (
     <div className="space-y-4">
@@ -1394,15 +1406,23 @@ export default function OverviewPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+<input
+                type="file"
+                ref={brmFileRef}
+                accept=".txt,.log"
+                className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleBrmUpload(f); e.target.value = ''; }}
+              />
               {!vendorLogSimulated ? (
                 <button
-                  onClick={() => { setVendorLogLoading(true); setTimeout(() => { setVendorLogLoading(false); setVendorLogSimulated(true); }, 2200); }}
-                  className="px-4 py-2 rounded-lg bg-gradient-to-r from-[#EF4444] to-[#DC2626] hover:from-[#DC2626] hover:to-[#EF4444] text-white text-xs font-bold transition-all shadow-lg hover:scale-105 flex items-center gap-2"
+                  onClick={() => brmFileRef.current?.click()}
+                  disabled={vendorLogLoading}
+                  className="px-4 py-2 rounded-lg bg-gradient-to-r from-[#EF4444] to-[#DC2626] hover:from-[#DC2626] hover:to-[#EF4444] text-white text-xs font-bold transition-all shadow-lg hover:scale-105 flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  {vendorLogLoading ? (<><span className="animate-spin inline-block">⟳</span> Analiz ediliyor...</>) : (<>📂 Demo Log Yükle</>)}
+                  {vendorLogLoading ? (<><span className="animate-spin inline-block">⟳</span> Analiz ediliyor...</>) : (<>📂 Log Yükle</>)}
                 </button>
               ) : (
-                <button onClick={() => { setVendorLogSimulated(false); setVendorLogTab('all'); setVendorLogPage(0); }} className="px-3 py-1.5 rounded-lg bg-[#1A3050] hover:bg-[#2B416B] text-[#A7B8D8] text-xs transition-all">✕ Temizle</button>
+                <button onClick={() => { setVendorLogSimulated(false); setVendorLogTab('all'); setVendorLogPage(0); setBrmLogData(null); setBrmLogError(null); }} className="px-3 py-1.5 rounded-lg bg-[#1A3050] hover:bg-[#2B416B] text-[#A7B8D8] text-xs transition-all">✕ Temizle</button>
               )}
             </div>
           </div>
@@ -1413,7 +1433,7 @@ export default function OverviewPage() {
               <div className="w-14 h-14 rounded-full bg-[#F2B705]/20 ring-2 ring-[#F2B705]/60 flex items-center justify-center text-3xl animate-spin">🧠</div>
               <div className="text-center">
                 <div className="text-sm font-bold text-white">AI Beyin BRM Logu İşliyor...</div>
-                <div className="text-xs text-[#A7B8D8] mt-1">HWBRMSAE410019P1 • 2943 satır • arıza örüntüsü analizi</div>
+                <div className="text-xs text-[#A7B8D8] mt-1">BRM log dosyası okunuyor • işlemler ayrıştırılıyor • arıza örüntüsü analizi</div>
               </div>
               <div className="flex gap-1.5 flex-wrap justify-center">
                 {['BRM formatı okunuyor', 'İşlemler ayrıştırılıyor', 'Hata kodları analiz', 'Arıza tespiti'].map((step, i) => (
@@ -1424,8 +1444,11 @@ export default function OverviewPage() {
           )}
 
           {/* Results */}
-          {vendorLogSimulated && !vendorLogLoading && (() => {
-            const filteredTxns = BRM_DEMO_LOG.transactions.filter(t => {
+          {vendorLogSimulated && !vendorLogLoading && brmLog && (() => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const BRM_DEMO_LOG = brmLog as any;
+            const BRM_BRAIN_FAULTS = brmFaults;
+            const filteredTxns = BRM_DEMO_LOG.transactions.filter((t: any) => {
               if (vendorLogTab === 'cashin') return t.op === 'cashin' && t.ok;
               if (vendorLogTab === 'dispense') return t.op === 'dispense' && t.ok;
               if (vendorLogTab === 'errors') return !t.ok;
@@ -1472,7 +1495,7 @@ export default function OverviewPage() {
                           <th className="px-3 py-2.5 text-center text-[#A7B8D8] font-semibold">Durum</th>
                         </tr></thead>
                         <tbody>
-                          {pageTxns.map((txn, idx) => (
+                          {(pageTxns as any[]).map((txn: any, idx: number) => (
                             <tr key={idx} className={`border-t border-[#1A3050] ${!txn.ok ? 'bg-[#FF4C4C]/5' : idx % 2 === 0 ? 'bg-[#0A1628]/30' : ''}`}>
                               <td className="px-3 py-2.5 font-mono text-[#A7B8D8]">{txn.ts}</td>
                               <td className="px-3 py-2.5">
@@ -1505,8 +1528,8 @@ export default function OverviewPage() {
                     {/* Saatlik Bar */}
                     <div><div className="text-[10px] text-[#A7B8D8] mb-2 uppercase tracking-wider font-semibold">Saatlik Hacim</div>
                       <div className="flex items-end gap-1 h-16 overflow-x-auto pb-1">
-                        {BRM_DEMO_LOG.hourly.map(h => {
-                          const maxVal = Math.max(...BRM_DEMO_LOG.hourly.map(x=>x.ci+x.di));
+                        {BRM_DEMO_LOG.hourly.map((h: any) => {
+                          const maxVal = Math.max(...BRM_DEMO_LOG.hourly.map((x: any)=>x.ci+x.di));
                           const total = h.ci+h.di; const height = Math.round((total/maxVal)*56);
                           const ciH = total>0?Math.round((h.ci/total)*height):0; const diH=height-ciH;
                           return (<div key={h.h} className="flex flex-col items-center gap-0.5 min-w-[22px]" title={`${h.h}:00`}><div className="flex flex-col justify-end" style={{height:'56px'}}>{ciH>0&&<div className="w-4 rounded-t bg-[#10B981]/70" style={{height:`${ciH}px`}}/>}{diH>0&&<div className={`w-4 ${ciH>0?'':'rounded-t'} rounded-b bg-[#F2B705]/70`} style={{height:`${diH}px`}}/>}</div><div className="text-[8px] text-[#A7B8D8]">{h.h}</div></div>);
@@ -1522,11 +1545,15 @@ export default function OverviewPage() {
                   <div className="xl:col-span-2 flex flex-col gap-3">
                     <div className="flex items-center gap-2"><div className="w-6 h-6 rounded-full bg-[#F2B705]/20 ring-1 ring-[#F2B705]/60 flex items-center justify-center text-sm animate-pulse">🧠</div><div className="text-xs font-bold text-[#A7B8D8] uppercase tracking-wider">AI Beyin Arıza Analizi</div></div>
                     <div className="p-3 rounded-xl bg-gradient-to-br from-[#FF4C4C]/10 to-[#FF4C4C]/5 ring-1 ring-[#FF4C4C]/30">
-                      <div className="flex items-center gap-2 mb-1.5"><span className="text-base">⚠️</span><span className="text-xs font-bold text-[#FF4C4C]">ARIZA TESPİTİ — BAKIM GEREKLİ</span></div>
-                      <div className="text-[11px] text-[#A7B8D8] leading-relaxed">Bu ATM 1 gün içinde <strong className="text-white">4 farklı arıza türü</strong> üretti. Retract motor kritik. Müdahale edilmezse <strong className="text-[#FF4C4C]">servis dışı kalma riski</strong> yüksek.</div>
+                      <div className="flex items-center gap-2 mb-1.5"><span className="text-base">{BRM_DEMO_LOG.error_count > 0 ? '⚠️' : '✅'}</span><span className={`text-xs font-bold ${BRM_DEMO_LOG.error_count > 0 ? 'text-[#FF4C4C]' : 'text-[#10B981]'}`}>{BRM_DEMO_LOG.error_count > 0 ? 'ARIZA TESPİTİ — BAKIM GEREKLİ' : 'SİSTEM NORMAL'}</span></div>
+                      <div className="text-[11px] text-[#A7B8D8] leading-relaxed">
+                        {BRM_DEMO_LOG.error_count > 0
+                          ? <>{BRM_BRAIN_FAULTS.length} arıza türü tespit edildi. En kritik: <strong className="text-white">{BRM_BRAIN_FAULTS[0]?.title || 'bakım gerekli'}</strong>. Müdahale edilmezse <strong className="text-[#FF4C4C]">servis dışı kalma riski</strong> yüksek.</>
+                          : 'Log inceleme tamamlandı. Kritik arıza tespit edilmedi.'}
+                      </div>
                       <div className="mt-2 pt-2 border-t border-[#FF4C4C]/20 flex items-center gap-2">
-                        <div className="text-lg font-black text-[#F2B705]">{BRM_DEMO_LOG.health_score}/100</div>
-                        <div className="flex-1"><div className="h-2 bg-[#1A3050] rounded-full overflow-hidden"><div className="h-full rounded-full bg-[#F2B705] transition-all duration-1000" style={{width:`${BRM_DEMO_LOG.health_score}%`}}/></div><div className="text-[10px] text-[#A7B8D8] mt-0.5">ATM Sağlık Skoru</div></div>
+                        <div className={`text-lg font-black ${BRM_DEMO_LOG.health_score>=80?'text-[#10B981]':BRM_DEMO_LOG.health_score>=60?'text-[#F2B705]':'text-[#FF4C4C]'}`}>{BRM_DEMO_LOG.health_score}/100</div>
+                        <div className="flex-1"><div className="h-2 bg-[#1A3050] rounded-full overflow-hidden"><div className={`h-full rounded-full transition-all duration-1000 ${BRM_DEMO_LOG.health_score>=80?'bg-[#10B981]':BRM_DEMO_LOG.health_score>=60?'bg-[#F2B705]':'bg-[#FF4C4C]'}`} style={{width:`${BRM_DEMO_LOG.health_score}%`}}/></div><div className="text-[10px] text-[#A7B8D8] mt-0.5">ATM Sağlık Skoru</div></div>
                       </div>
                     </div>
                     {BRM_BRAIN_FAULTS.map(fault => {
@@ -1545,8 +1572,10 @@ export default function OverviewPage() {
                     })}
                     <div className="p-3 rounded-xl bg-[#0E2142] ring-1 ring-[#2B416B]">
                       <div className="text-[10px] font-bold text-[#2E86FF] mb-2">🧠 AI KARAR ÖZETİ</div>
-                      {[{icon:'🔴',text:'Retract motor: 3 gün içinde parça değişimi'},{icon:'🟠',text:'Transport belt: fiziksel inspeksiyon + yağlama'},{icon:'🟡',text:'Banknot okuyucu: rutin temizlik (ultrasonik)'},{icon:'🔵',text:'Toplama operasyonu: yarın öncelikli'}].map((item,i)=>(<div key={i} className="flex items-start gap-2 text-[10px] text-[#A7B8D8]"><span>{item.icon}</span><span>{item.text}</span></div>))}
-                      <div className="mt-2 pt-2 border-t border-[#2B416B] text-[10px] text-[#A7B8D8]">Önleyici maliyet: <strong className="text-[#10B981]">₺8,500</strong> vs servis dışı: <strong className="text-[#FF4C4C]">₺45,000+</strong></div>
+                      {BRM_BRAIN_FAULTS.length > 0
+                        ? BRM_BRAIN_FAULTS.slice(0,4).map((f: any, i: number)=>(<div key={i} className="flex items-start gap-2 text-[10px] text-[#A7B8D8]"><span>{f.severity==='critical'?'🔴':f.severity==='high'?'🟠':'🟡'}</span><span>{f.action}</span></div>))
+                        : <div className="text-[10px] text-[#10B981]">✓ Kritik arıza tespit edilmedi. Rutin bakım takibi yeterli.</div>}
+                      <div className="mt-2 pt-2 border-t border-[#2B416B] text-[10px] text-[#A7B8D8]">Log Tarihi: <strong className="text-white">{BRM_DEMO_LOG.log_date}</strong> • Kaynak: <strong className="text-[#A7B8D8]">{BRM_DEMO_LOG.source_file}</strong></div>
                     </div>
                   </div>
                 </div>
@@ -1558,7 +1587,10 @@ export default function OverviewPage() {
           {!vendorLogSimulated && !vendorLogLoading && (
             <div className="flex flex-col items-center justify-center py-8 gap-3 text-center">
               <div className="text-4xl opacity-30">📋</div>
-              <div className="text-sm text-[#A7B8D8]">Vendor log analizi için yukarıdaki <strong className="text-white">"Demo Log Yükle"</strong> butonuna basın.</div>
+              {brmLogError && (
+                <div className="text-xs text-[#EF4444] bg-[#EF4444]/10 ring-1 ring-[#EF4444]/30 rounded-lg px-4 py-2">❌ {brmLogError}</div>
+              )}
+              <div className="text-sm text-[#A7B8D8]">Vendor log analizi için yukarıdaki <strong className="text-white">"Log Yükle"</strong> butonuna basın.</div>
               <div className="text-xs text-[#A7B8D8]/60">Format: Hyosung / Nautilus BRM log (.txt) • AI Beyin arıza örüntüsü tespit eder</div>
             </div>
           )}
