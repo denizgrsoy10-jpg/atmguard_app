@@ -28,7 +28,32 @@ export async function POST(request: NextRequest) {
     });
 
     const parsed = JSON.parse(stdout);
-    return NextResponse.json(parsed);
+
+    // ── Call real AI Brain for actual decision ──────────────────────────────
+    let brain_verdict: Record<string, unknown> | null = null;
+    try {
+      const brainRes = await fetch('http://localhost:8000/api/v1/brm-log-analiz', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          atm_id:       parsed.atm_id     || 'UNKNOWN',
+          log_date:     parsed.log_date   || null,
+          errors:       parsed.errors     || [],
+          health_score: parsed.health_score ?? null,
+        }),
+        signal: AbortSignal.timeout(12_000),
+      });
+      if (brainRes.ok) {
+        brain_verdict = await brainRes.json();
+      } else {
+        console.warn('AI Brain returned non-OK:', brainRes.status);
+      }
+    } catch (brainErr) {
+      // Brain offline or unreachable — frontend will fall back to heuristic mode
+      console.warn('AI Brain API unavailable:', (brainErr as Error).message);
+    }
+
+    return NextResponse.json({ ...parsed, brain_verdict });
   } catch (error: any) {
     console.error('BRM log parse error:', error);
     return NextResponse.json(

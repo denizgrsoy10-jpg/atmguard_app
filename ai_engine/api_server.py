@@ -347,6 +347,96 @@ def express_log_al(req: ExpressLogRequest):
     return {"basarili": True, "mesaj": "Log işlendi"}
 
 
+class BrmLogAnalizRequest(BaseModel):
+    atm_id: str
+    log_date: Optional[str]   = None
+    errors:   List[Dict]      = []
+    health_score: Optional[int] = None
+
+
+@app.post(
+    "/api/v1/brm-log-analiz",
+    tags=["Feed — Arıza Tarafı"],
+    summary="BRM Log Analizi — Parser çıktısını beyne besle, gerçek AI kararı al",
+    status_code=status.HTTP_200_OK,
+)
+def brm_log_analiz(req: BrmLogAnalizRequest):
+    """
+    Frontend BRM log parser'ın ürettiği JSON'u alır, hataları beyne besler
+    ve `ATMBrainOrchestrator`'ın gerçek kararını döner.
+
+    Akış:
+    1. Her error satırını `ingest_ariza_feed()` ile beyne yükle
+    2. `run_full_decision_cycle(atm_listesi=[atm_id])` çalıştır
+    3. `BeyinKarari.to_dict()` döndür
+    """
+    brain = get_brain()
+
+    # ── 1) Önce bu ATM'nin önceki arızalarını temizle (taze analiz) ──────────
+    if req.atm_id in brain._aktif_arizalar:
+        del brain._aktif_arizalar[req.atm_id]
+
+    # ── 2) Hata satırlarını arıza feed'ine dönüştür ──────────────────────────
+    if req.errors:
+        ariza_feed = []
+        for e in req.errors:
+            ts_raw = e.get("timestamp")
+            try:
+                ts = datetime.fromisoformat(str(ts_raw)).isoformat() if ts_raw else datetime.now().isoformat()
+            except Exception:
+                ts = datetime.now().isoformat()
+
+            # Servis tipi: parser'dan gelen service_type alanını kullan
+            # SLM → NAKIT_MODÜL keyword'ü ile beyin SLM_VENDOR kararı verir
+            # FLM → SHUTTER/JAM/CCDM keyword'leri ile FLM_VENDOR kararı verir
+            # Bilinmeyen → description keyword match'e bırak, fallback FLM
+            hex_code = str(e.get("error_code", "UNKNOWN"))
+            desc = str(e.get("description", "")).strip().upper()
+            service_type = str(e.get("service_type", "FLM")).upper()
+
+            SLM_KEYWORDS = {"NAKIT_MODÜL": "NAKIT_MODÜL", "RECYCLER": "RECYCLER", "DISPENSER": "DISPENSER"}
+            FLM_KEYWORDS = {"SHUTTER": "SHUTTER", "JAM": "JAM", "CCDM": "CCDM"}
+
+            if service_type == "SLM":
+                # Nakit modülü hardware arızası → NAKIT_MODÜL keyword → beyin SLM seçer
+                ariza_kodu = f"NAKIT_MODÜL {desc}"
+            else:
+                # Açıklamada zaten JAM/SHUTTER/CCDM gibi FLM kelimesi varsa doğrudan kullan
+                ariza_kodu = desc if desc else hex_code
+
+            ariza_feed.append({
+                "terminal_id": req.atm_id,
+                "tarih":       ts,
+                "ariza_kodu":  ariza_kodu,
+                "aciklama":    f"{hex_code}: {e.get('description', '')}",
+                "durum":       "ACIK",
+                "sure_dk":     max(0, int((datetime.now() - datetime.fromisoformat(ts)).total_seconds() / 60)) if ts else 0,
+                "vendor_log":  f"{e.get('command', '')} [{hex_code}]",
+            })
+        brain.ingest_ariza_feed(ariza_feed)
+        logger.info(f"[BRM LOG ANALİZ] {len(ariza_feed)} hata beyne beslendi → ATM: {req.atm_id}")
+
+    # ── 2) Karar döngüsünü sadece bu ATM için çalıştır ───────────────────────
+    kararlar = brain.run_full_decision_cycle(atm_listesi=[req.atm_id])
+
+    if not kararlar:
+        return {
+            "terminal_id":      req.atm_id,
+            "eylem":            "IZLE",
+            "aciliyet":         "DUSUK",
+            "mesaj":            "Kritik arıza tespit edilmedi — rutin izleme yeterli",
+            "sebepler":         [],
+            "ariza_riski":      0.0,
+            "nakit_sure_saat":  999.0,
+            "atanan_takim":     "—",
+            "kombine_isler":    [],
+            "tahmini_maliyet":  0.0,
+            "tahmini_tasarruf": 0.0,
+        }
+
+    return kararlar[0].to_dict()
+
+
 # ── Karar Endpoint'leri ─────────────────────────────────────────────────────
 @app.get(
     "/api/v1/kararlar",

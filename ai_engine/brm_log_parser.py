@@ -54,6 +54,20 @@ ERROR_DESCRIPTIONS = {
     "564FFF2":  "CashIn End hatası (işlem tamamlanamadı)",
     "5678000":  "CIM genel transport hatası",
     "567800A":  "Double-detect / çift banknot algılama",
+    "5F00130":  "Validator sensör hatası (okuma/kalibrasyon)",
+}
+
+# Servis tipi haritası — hangi ekip gitmelidir?
+# FLM : Bantaş saha ekibi (fiziksel temizlik, sıkışma açma, kağıt değişimi)
+# SLM : Vendor teknik servis (hardware arızası — motor, sensör, nakit modülü)
+BRM_SERVICE_TYPE = {
+    "5720000": "SLM",   # Retract motoru = nakit modülü hardware arızası
+    "5F0000D": "SLM",   # Validator sensörü = hassas optik donanım
+    "5F00130": "SLM",   # Validator ailesi
+    "5678022": "FLM",   # Shutter/transport sıkışması = FLM açar
+    "564FFF2": "FLM",   # CashIn End = işlem hatası, FLM reset
+    "5678000": "FLM",   # Genel transport = FLM
+    "567800A": "FLM",   # Double-detect = hizalama/kağıt sorunu, FLM
 }
 
 
@@ -232,6 +246,7 @@ def parse_brm_log(filepath: str) -> dict:
                     "command": cmd_match.group(0) if cmd_match else "UNKNOWN",
                     "error_code": code,
                     "description": ERROR_DESCRIPTIONS.get(code, f"Bilinmeyen hata kodu: {code}"),
+                    "service_type": BRM_SERVICE_TYPE.get(code, "FLM"),
                 })
 
         i += 1
