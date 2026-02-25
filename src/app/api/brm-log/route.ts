@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
     tmpPath = join('/tmp', `brm_${Date.now()}_${safeName}`);
     await writeFile(tmpPath, buffer);
 
-    const parserPath = join(process.cwd(), '..', 'ai_engine', 'brm_log_parser.py');
+    const parserPath = join(process.cwd(), 'ai_engine', 'brm_log_parser.py');
     const { stdout } = await execFileAsync('python3', [parserPath, '--json-only', tmpPath], {
       timeout: 30_000,
     });

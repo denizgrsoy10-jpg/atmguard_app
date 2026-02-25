@@ -1448,14 +1448,18 @@ export default function OverviewPage() {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const BRM_DEMO_LOG = brmLog as any;
             const BRM_BRAIN_FAULTS = brmFaults;
-            const filteredTxns = BRM_DEMO_LOG.transactions.filter((t: any) => {
-              if (vendorLogTab === 'cashin') return t.op === 'cashin' && t.ok;
-              if (vendorLogTab === 'dispense') return t.op === 'dispense' && t.ok;
-              if (vendorLogTab === 'errors') return !t.ok;
-              return true;
-            });
-            const pageCount = Math.ceil(filteredTxns.length / VENDOR_LOG_PAGE_SIZE);
-            const pageTxns = filteredTxns.slice(vendorLogPage * VENDOR_LOG_PAGE_SIZE, (vendorLogPage + 1) * VENDOR_LOG_PAGE_SIZE);
+
+            // Hata kodu frekans tablosu için ham errors listesi
+            const rawErrors: any[] = brmLogData?.errors || [];
+            const errorFreq: Record<string, { code: string; desc: string; count: number; severity: string }> = {};
+            for (const e of rawErrors) {
+              if (!errorFreq[e.error_code]) {
+                errorFreq[e.error_code] = { code: e.error_code, desc: e.description, count: 0, severity: e.severity || 'medium' };
+              }
+              errorFreq[e.error_code].count++;
+            }
+            const errorList = Object.values(errorFreq).sort((a, b) => b.count - a.count);
+
             return (
               <div className="flex flex-col gap-4">
                 {/* ATM Info Strip */}
@@ -1465,84 +1469,86 @@ export default function OverviewPage() {
                     <div className="text-sm font-bold text-white">ATM: {BRM_DEMO_LOG.atm_id}</div>
                     <div className="text-[11px] text-[#A7B8D8]">Log tarihi: {BRM_DEMO_LOG.log_date} • Kaynak: {BRM_DEMO_LOG.source_file}</div>
                   </div>
-                  {[{ label: 'Para Yatırma', val: `${BRM_DEMO_LOG.cashin_count} işlem`, color: '#10B981' }, { label: 'Para Çekme', val: `${BRM_DEMO_LOG.dispense_count} işlem`, color: '#F2B705' }, { label: 'Net Akış', val: `+₺${(BRM_DEMO_LOG.net_flow_try/1000).toFixed(0)}K`, color: '#2E86FF' }, { label: 'Hata', val: `${BRM_DEMO_LOG.error_count} olay`, color: '#FF4C4C' }].map(stat => (
-                    <div key={stat.label} className="text-center"><div className="text-xs font-bold" style={{ color: stat.color }}>{stat.val}</div><div className="text-[10px] text-[#A7B8D8]">{stat.label}</div></div>
+                  {[
+                    { label: 'Para Yatırma', val: `${BRM_DEMO_LOG.cashin_count} işlem`,   color: '#10B981' },
+                    { label: 'Para Çekme',   val: `${BRM_DEMO_LOG.dispense_count} işlem`, color: '#F2B705' },
+                    { label: 'Net Akış',     val: `${BRM_DEMO_LOG.net_flow_try >= 0 ? '+' : ''}₺${(BRM_DEMO_LOG.net_flow_try/1000).toFixed(0)}K`, color: '#2E86FF' },
+                    { label: 'Red. Banknot', val: `${BRM_DEMO_LOG.total_rejected_notes} adet`, color: '#F59E0B' },
+                    { label: 'Hata',         val: `${BRM_DEMO_LOG.error_count} olay`,     color: '#FF4C4C' },
+                  ].map(stat => (
+                    <div key={stat.label} className="text-center">
+                      <div className="text-xs font-bold" style={{ color: stat.color }}>{stat.val}</div>
+                      <div className="text-[10px] text-[#A7B8D8]">{stat.label}</div>
+                    </div>
                   ))}
                   <div className="flex flex-col items-center ml-2">
                     <div className={`text-2xl font-black ${BRM_DEMO_LOG.health_score >= 80 ? 'text-[#10B981]' : BRM_DEMO_LOG.health_score >= 60 ? 'text-[#F2B705]' : 'text-[#FF4C4C]'}`}>{BRM_DEMO_LOG.health_score}</div>
                     <div className="text-[10px] text-[#A7B8D8]">Sağlık/100</div>
                   </div>
                 </div>
-                {/* Two-column layout */}
-                <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
-                  {/* Log Table */}
-                  <div className="xl:col-span-3 flex flex-col gap-3">
-                    <div className="text-xs font-bold text-[#A7B8D8] uppercase tracking-wider">📊 İşlem Logu</div>
-                    <div className="flex gap-1 flex-wrap">
-                      {([{ key: 'all', label: `Tümü (${BRM_DEMO_LOG.transactions.length})`, icon: '📋' }, { key: 'cashin', label: `Yatırma (${BRM_DEMO_LOG.cashin_count})`, icon: '💳' }, { key: 'dispense', label: `Çekme (${BRM_DEMO_LOG.dispense_count})`, icon: '💸' }, { key: 'errors', label: `Hatalar (${BRM_DEMO_LOG.error_count})`, icon: '🚨' }] as Array<{ key: typeof vendorLogTab; label: string; icon: string }>).map(tab => (
-                        <button key={tab.key} onClick={() => { setVendorLogTab(tab.key); setVendorLogPage(0); }} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${vendorLogTab === tab.key ? (tab.key === 'errors' ? 'bg-[#FF4C4C]/20 text-[#FF4C4C] ring-1 ring-[#FF4C4C]/40' : 'bg-[#2E86FF]/20 text-[#2E86FF] ring-1 ring-[#2E86FF]/40') : 'bg-[#1A3050] text-[#A7B8D8] hover:bg-[#2B416B]'}`}>{tab.icon} {tab.label}</button>
-                      ))}
-                    </div>
-                    <div className="rounded-xl overflow-hidden ring-1 ring-[#2B416B]">
-                      <table className="w-full text-xs">
-                        <thead><tr className="bg-[#0E2142]">
-                          <th className="px-3 py-2.5 text-left text-[#A7B8D8] font-semibold">Zaman</th>
-                          <th className="px-3 py-2.5 text-left text-[#A7B8D8] font-semibold">İşlem</th>
-                          <th className="px-3 py-2.5 text-right text-[#A7B8D8] font-semibold">Tutar</th>
-                          <th className="px-3 py-2.5 text-center text-[#A7B8D8] font-semibold">100₺</th>
-                          <th className="px-3 py-2.5 text-center text-[#A7B8D8] font-semibold">200₺</th>
-                          <th className="px-3 py-2.5 text-center text-[#A7B8D8] font-semibold">NG</th>
-                          <th className="px-3 py-2.5 text-center text-[#A7B8D8] font-semibold">Durum</th>
-                        </tr></thead>
-                        <tbody>
-                          {(pageTxns as any[]).map((txn: any, idx: number) => (
-                            <tr key={idx} className={`border-t border-[#1A3050] ${!txn.ok ? 'bg-[#FF4C4C]/5' : idx % 2 === 0 ? 'bg-[#0A1628]/30' : ''}`}>
-                              <td className="px-3 py-2.5 font-mono text-[#A7B8D8]">{txn.ts}</td>
-                              <td className="px-3 py-2.5">
-                                {txn.ok ? (<span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${txn.op === 'cashin' ? 'bg-[#10B981]/15 text-[#10B981]' : 'bg-[#F2B705]/15 text-[#F2B705]'}`}>{txn.op === 'cashin' ? '💳 Para Yatırma' : '💸 Para Çekme'}</span>) : (<span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#FF4C4C]/15 text-[#FF4C4C]">🚨 {txn.error}</span>)}
-                              </td>
-                              <td className="px-3 py-2.5 text-right font-bold">
-                                {txn.ok && txn.amount > 0 ? (<span className={txn.op === 'cashin' ? 'text-[#10B981]' : 'text-[#F2B705]'}>₺{txn.amount.toLocaleString('tr-TR')}</span>) : txn.ok ? <span className="text-[#A7B8D8]">—</span> : <span className="text-[#FF4C4C] text-[10px]">{txn.errorDesc}</span>}
-                              </td>
-                              <td className="px-3 py-2.5 text-center text-[#A7B8D8]">{txn.notes['100'] ? <span className="text-white font-semibold">×{txn.notes['100']}</span> : '—'}</td>
-                              <td className="px-3 py-2.5 text-center text-[#A7B8D8]">{txn.notes['200'] ? <span className="text-white font-semibold">×{txn.notes['200']}</span> : '—'}</td>
-                              <td className="px-3 py-2.5 text-center">{txn.rejected > 0 ? <span className="text-[#FF4C4C] font-bold">×{txn.rejected}</span> : <span className="text-[#A7B8D8]">—</span>}</td>
-                              <td className="px-3 py-2.5 text-center">{txn.ok ? <span className="text-[#10B981] text-[10px]">✓ OK</span> : <span className="text-[#FF4C4C] text-[10px] font-bold">✗ HATA</span>}</td>
+
+                {/* Two-column layout: Error Freq | AI Analysis */}
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+
+                  {/* LEFT: Hata Kodu Frekans Tablosu */}
+                  <div className="flex flex-col gap-3">
+                    <div className="text-xs font-bold text-[#A7B8D8] uppercase tracking-wider">🚨 Hata Kodu Frekansı</div>
+                    {errorList.length === 0 ? (
+                      <div className="flex items-center justify-center py-8 text-xs text-[#10B981] bg-[#10B981]/5 rounded-xl ring-1 ring-[#10B981]/20">
+                        ✓ Log dosyasında hata kodu tespit edilmedi
+                      </div>
+                    ) : (
+                      <div className="rounded-xl overflow-hidden ring-1 ring-[#2B416B]">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="bg-[#0E2142]">
+                              <th className="px-3 py-2.5 text-left text-[#A7B8D8] font-semibold">#</th>
+                              <th className="px-3 py-2.5 text-left text-[#A7B8D8] font-semibold">Hata Kodu</th>
+                              <th className="px-3 py-2.5 text-left text-[#A7B8D8] font-semibold">Açıklama</th>
+                              <th className="px-3 py-2.5 text-center text-[#A7B8D8] font-semibold">Adet</th>
+                              <th className="px-3 py-2.5 text-center text-[#A7B8D8] font-semibold">Ağırlık</th>
                             </tr>
-                          ))}
-                        </tbody>
-                        <tfoot><tr className="bg-[#0E2142] border-t border-[#2B416B]">
-                          <td colSpan={2} className="px-3 py-2 text-[#A7B8D8] text-[10px]">{filteredTxns.length} kayıt • Sayfa {vendorLogPage+1}/{Math.max(1,pageCount)}</td>
-                          <td className="px-3 py-2 text-right text-[10px]"><span className="text-[#10B981]">+₺{BRM_DEMO_LOG.total_cashin_try.toLocaleString('tr-TR')}</span>{' / '}<span className="text-[#F2B705]">-₺{BRM_DEMO_LOG.total_dispense_try.toLocaleString('tr-TR')}</span></td>
-                          <td colSpan={4} className="px-3 py-2 text-center text-[10px] text-[#FF4C4C]">{BRM_DEMO_LOG.total_rejected_notes} banknot reddedildi</td>
-                        </tr></tfoot>
-                      </table>
-                    </div>
-                    {pageCount > 1 && (
-                      <div className="flex items-center justify-center gap-2">
-                        <button onClick={() => setVendorLogPage(p => Math.max(0,p-1))} disabled={vendorLogPage===0} className="px-3 py-1.5 rounded-lg bg-[#1A3050] text-[#A7B8D8] text-xs disabled:opacity-40 hover:bg-[#2B416B] transition-all">← Önceki</button>
-                        {Array.from({length:pageCount},(_,i)=>(<button key={i} onClick={()=>setVendorLogPage(i)} className={`w-7 h-7 rounded-lg text-xs font-bold transition-all ${vendorLogPage===i?'bg-[#2E86FF] text-white':'bg-[#1A3050] text-[#A7B8D8] hover:bg-[#2B416B]'}`}>{i+1}</button>))}
-                        <button onClick={() => setVendorLogPage(p => Math.min(pageCount-1,p+1))} disabled={vendorLogPage===pageCount-1} className="px-3 py-1.5 rounded-lg bg-[#1A3050] text-[#A7B8D8] text-xs disabled:opacity-40 hover:bg-[#2B416B] transition-all">Sonraki →</button>
+                          </thead>
+                          <tbody>
+                            {errorList.map((e, idx) => {
+                              const maxCount = errorList[0].count;
+                              const pct = Math.round((e.count / maxCount) * 100);
+                              const sevColor = e.severity === 'critical' ? '#FF4C4C' : e.severity === 'high' ? '#F2B705' : '#2E86FF';
+                              const sevBg   = e.severity === 'critical' ? 'bg-[#FF4C4C]/10' : e.severity === 'high' ? 'bg-[#F2B705]/10' : 'bg-[#2E86FF]/10';
+                              return (
+                                <tr key={e.code} className={`border-t border-[#1A3050] ${idx % 2 === 0 ? 'bg-[#0A1628]/30' : ''}`}>
+                                  <td className="px-3 py-2.5 text-[#A7B8D8] font-mono">{idx + 1}</td>
+                                  <td className="px-3 py-2.5">
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded font-mono text-[11px] font-bold ${sevBg}`} style={{ color: sevColor }}>{e.code}</span>
+                                  </td>
+                                  <td className="px-3 py-2.5 text-[#A7B8D8] leading-snug max-w-[220px]">{e.desc}</td>
+                                  <td className="px-3 py-2.5 text-center font-black text-white text-sm">{e.count}</td>
+                                  <td className="px-3 py-2.5">
+                                    <div className="flex items-center gap-1.5">
+                                      <div className="flex-1 h-1.5 bg-[#1A3050] rounded-full overflow-hidden">
+                                        <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: sevColor }} />
+                                      </div>
+                                      <span className="text-[9px] text-[#A7B8D8] w-6 text-right">{pct}%</span>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                          <tfoot>
+                            <tr className="bg-[#0E2142] border-t border-[#2B416B]">
+                              <td colSpan={3} className="px-3 py-2 text-[#A7B8D8] text-[10px]">Toplam {errorList.length} farklı hata kodu</td>
+                              <td className="px-3 py-2 text-center text-white font-bold text-[11px]">{rawErrors.length}</td>
+                              <td className="px-3 py-2 text-[10px] text-[#A7B8D8] text-right">toplam olay</td>
+                            </tr>
+                          </tfoot>
+                        </table>
                       </div>
                     )}
-                    {/* Saatlik Bar */}
-                    <div><div className="text-[10px] text-[#A7B8D8] mb-2 uppercase tracking-wider font-semibold">Saatlik Hacim</div>
-                      <div className="flex items-end gap-1 h-16 overflow-x-auto pb-1">
-                        {BRM_DEMO_LOG.hourly.map((h: any) => {
-                          const maxVal = Math.max(...BRM_DEMO_LOG.hourly.map((x: any)=>x.ci+x.di));
-                          const total = h.ci+h.di; const height = Math.round((total/maxVal)*56);
-                          const ciH = total>0?Math.round((h.ci/total)*height):0; const diH=height-ciH;
-                          return (<div key={h.h} className="flex flex-col items-center gap-0.5 min-w-[22px]" title={`${h.h}:00`}><div className="flex flex-col justify-end" style={{height:'56px'}}>{ciH>0&&<div className="w-4 rounded-t bg-[#10B981]/70" style={{height:`${ciH}px`}}/>}{diH>0&&<div className={`w-4 ${ciH>0?'':'rounded-t'} rounded-b bg-[#F2B705]/70`} style={{height:`${diH}px`}}/>}</div><div className="text-[8px] text-[#A7B8D8]">{h.h}</div></div>);
-                        })}
-                      </div>
-                      <div className="flex gap-3 mt-1">
-                        <div className="flex items-center gap-1 text-[10px] text-[#A7B8D8]"><div className="w-2.5 h-2.5 rounded-sm bg-[#10B981]/70"/> Para Yatırma</div>
-                        <div className="flex items-center gap-1 text-[10px] text-[#A7B8D8]"><div className="w-2.5 h-2.5 rounded-sm bg-[#F2B705]/70"/> Para Çekme</div>
-                      </div>
-                    </div>
                   </div>
-                  {/* AI Analysis */}
-                  <div className="xl:col-span-2 flex flex-col gap-3">
+
+                  {/* RIGHT: AI Analysis */}
+                  <div className="flex flex-col gap-3">
                     <div className="flex items-center gap-2"><div className="w-6 h-6 rounded-full bg-[#F2B705]/20 ring-1 ring-[#F2B705]/60 flex items-center justify-center text-sm animate-pulse">🧠</div><div className="text-xs font-bold text-[#A7B8D8] uppercase tracking-wider">AI Beyin Arıza Analizi</div></div>
                     <div className="p-3 rounded-xl bg-gradient-to-br from-[#FF4C4C]/10 to-[#FF4C4C]/5 ring-1 ring-[#FF4C4C]/30">
                       <div className="flex items-center gap-2 mb-1.5"><span className="text-base">{BRM_DEMO_LOG.error_count > 0 ? '⚠️' : '✅'}</span><span className={`text-xs font-bold ${BRM_DEMO_LOG.error_count > 0 ? 'text-[#FF4C4C]' : 'text-[#10B981]'}`}>{BRM_DEMO_LOG.error_count > 0 ? 'ARIZA TESPİTİ — BAKIM GEREKLİ' : 'SİSTEM NORMAL'}</span></div>
