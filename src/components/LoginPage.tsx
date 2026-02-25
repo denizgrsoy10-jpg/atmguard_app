@@ -90,7 +90,8 @@ export default function LoginPage() {
           </form>
 
           {/* Demo Accounts */}
-          <div className="mt-8 pt-6 border-t border-white/20">Test Hesapları:</p>
+          <div className="mt-8 pt-6 border-t border-white/20">
+            <p className="text-sm text-white/60 mb-3">Test Hesapları:</p>
             <div className="space-y-2">
               {demoAccounts.map((account) => (
                 <button
@@ -104,8 +105,7 @@ export default function LoginPage() {
                   <div className="flex justify-between items-center">
                     <div>
                       <div className="text-sm font-medium text-white">{account.name}</div>
-                      <div className="text-xs text-gray-400">Sicil: {account.sicil} • {account.roleunt.role}</div>
-                      <div className="text-xs text-gray-400">{account.email}</div>
+                      <div className="text-xs text-gray-400">Sicil: {account.sicil} • {account.role}</div>
                     </div>
                     <div className="text-xs text-blue-300">{account.desc}</div>
                   </div>

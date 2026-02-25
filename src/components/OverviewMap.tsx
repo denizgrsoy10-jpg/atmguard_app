@@ -83,60 +83,55 @@ function getClusterIcon(cluster: any) {
   else if (m >= h && m >= l) dominant = "Medium";
 
   const accent = dominant === "High" ? "#E63946" : dominant === "Medium" ? "#F2B705" : "#2E86FF";
+  const bgColor = dominant === "High" ? "rgba(230,57,70,0.15)" : dominant === "Medium" ? "rgba(242,183,5,0.15)" : "rgba(46,134,255,0.15)";
 
   const html = `
   <div style="
     position:relative;
     display:flex;flex-direction:column;align-items:center;justify-content:center;
-    width:78px;height:52px;border-radius:16px;
-    background: rgba(14,33,66,0.74);
-    border: 1px solid rgba(46,134,255,0.55);
-    box-shadow: 0 10px 26px rgba(0,0,0,0.30);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    color: rgba(255,255,255,0.92);
+    padding: 8px 12px;
+    border-radius:12px;
+    background: linear-gradient(135deg, rgba(17,37,68,0.95) 0%, rgba(14,33,66,0.90) 100%);
+    border: 2px solid ${accent};
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.1) inset;
+    color: white;
     font-family: ui-sans-serif, system-ui, -apple-system;
-    overflow:hidden;
+    min-width: 60px;
   ">
     <div style="
-      font-weight:900;
-      font-size:12px;
-      line-height:12px;
-      letter-spacing:0.2px;
-      white-space:nowrap;
+      font-weight: 800;
+      font-size: 16px;
+      line-height: 1;
+      color: ${accent};
+      margin-bottom: 4px;
     ">
-      ${count} ATM
+      ${count}
     </div>
-
+    
     <div style="
-      margin-top:6px;
-      font-size:9px;
-      line-height:9px;
-      letter-spacing:0px;
-      color: rgba(167,184,216,0.95);
-      display:flex;
-      gap:6px;
-      align-items:center;
-      white-space:nowrap;
+      font-size: 9px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.7);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
     ">
-      <span style="display:flex;align-items:center;gap:3px;">
-        <i style="width:6px;height:6px;border-radius:999px;background:#E63946;display:inline-block;"></i>H:${h}
-      </span>
-      <span style="display:flex;align-items:center;gap:3px;">
-        <i style="width:6px;height:6px;border-radius:999px;background:#F2B705;display:inline-block;"></i>M:${m}
-      </span>
-      <span style="display:flex;align-items:center;gap:3px;">
-        <i style="width:6px;height:6px;border-radius:999px;background:#2E86FF;display:inline-block;"></i>L:${l}
-      </span>
+      ATM
     </div>
-
+    
+    ${h > 0 || m > 0 ? `
     <div style="
-      position:absolute; inset:0;
-      border-radius:16px;
-      border:2px solid ${accent};
-      opacity:0.32;
-      pointer-events:none;
-    "></div>
+      margin-top: 6px;
+      padding-top: 4px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      font-size: 8px;
+      display: flex;
+      gap: 6px;
+      color: rgba(167,184,216,0.9);
+    ">
+      ${h > 0 ? `<span style="display:flex;align-items:center;gap:2px;"><i style="width:5px;height:5px;border-radius:999px;background:#E63946;"></i>${h}</span>` : ''}
+      ${m > 0 ? `<span style="display:flex;align-items:center;gap:2px;"><i style="width:5px;height:5px;border-radius:999px;background:#F2B705;"></i>${m}</span>` : ''}
+    </div>
+    ` : ''}
   </div>`;
 
   return L.divIcon({

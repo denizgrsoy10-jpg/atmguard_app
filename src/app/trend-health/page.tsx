@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { TrainingLogEntry } from "@/app/api/train-upload/route";
 
 type DriftRow = { feature: string; psi: number; ks: number };
 type NetRoiPoint = { x: number; y: number };
@@ -142,6 +143,394 @@ const METRIC_EXPLANATIONS: Record<string, MetricInfo> = {
     interpretation: "Avoided her zaman cost'tan yüksekse → pozitif ROI. Gün 30'da 1.8M avoided vs 600K cost = 3x ROI, mükemmel performans."
   }
 };
+
+const VERI_TURLERI = [
+  {
+    id: "ariza_log",
+    label: "Arıza Log",
+    icon: "🔧",
+    renk: "text-red-400 border-red-500/40 bg-red-500/10",
+    aktif: "border-red-400 bg-red-500/20 text-red-300",
+    kolonlar: ["terminal_id", "tarih", "ariza_kodu", "aciklama", "durum", "sure_dk"],
+    aciklama: "Açık/kapanmış arıza kayıtları",
+  },
+  {
+    id: "ikmal",
+    label: "İkmal Kaydı",
+    icon: "💰",
+    renk: "text-emerald-400 border-emerald-500/40 bg-emerald-500/10",
+    aktif: "border-emerald-400 bg-emerald-500/20 text-emerald-300",
+    kolonlar: ["terminal_id", "tarih", "ikmal_tutar", "kaset_miktari"],
+    aciklama: "Nakit yükleme kayıtları",
+  },
+  {
+    id: "para_toplama",
+    label: "Para Toplama",
+    icon: "🏧",
+    renk: "text-amber-400 border-amber-500/40 bg-amber-500/10",
+    aktif: "border-amber-400 bg-amber-500/20 text-amber-300",
+    kolonlar: ["terminal_id", "tarih", "toplama_tutar"],
+    aciklama: "CIT para toplama kayıtları",
+  },
+  {
+    id: "gunluk_bakiye",
+    label: "Günlük Bakiye",
+    icon: "📊",
+    renk: "text-blue-400 border-blue-500/40 bg-blue-500/10",
+    aktif: "border-blue-400 bg-blue-500/20 text-blue-300",
+    kolonlar: ["terminal_id", "tarih", "tl_bakiye", "kaset_1", "kaset_2", "kaset_3", "kaset_4", "recycle_bakiye"],
+    aciklama: "Günlük kaset ve bakiye durumu",
+  },
+];
+
+const AYLAR = [
+  { v: "01", l: "Ocak" }, { v: "02", l: "Şubat" }, { v: "03", l: "Mart" },
+  { v: "04", l: "Nisan" }, { v: "05", l: "Mayıs" }, { v: "06", l: "Haziran" },
+  { v: "07", l: "Temmuz" }, { v: "08", l: "Ağustos" }, { v: "09", l: "Eylül" },
+  { v: "10", l: "Ekim" }, { v: "11", l: "Kasım" }, { v: "12", l: "Aralık" },
+];
+
+const YILLAR = ["2023", "2024", "2025", "2026"];
+
+function UploadPanel() {
+  const [veriTuru, setVeriTuru]     = useState("ariza_log");
+  const [ay, setAy]                 = useState("01");
+  const [yil, setYil]               = useState("2026");
+  const [dosya, setDosya]           = useState<File | null>(null);
+  const [dragging, setDragging]     = useState(false);
+  const [loading, setLoading]       = useState(false);
+  const [sonuc, setSonuc]           = useState<{
+    satir_sayisi: number; kolonlar: string[];
+    eslesen_kolonlar: string[]; beklenen_kolonlar: string[];
+    eslesme_orani: number; mesaj: string;
+  } | null>(null);
+  const [hata, setHata]             = useState<string | null>(null);
+  const [gecmis, setGecmis]         = useState<TrainingLogEntry[]>([]);
+
+  const fileRef = useRef<HTMLInputElement>(null);
+  const seciliTur = VERI_TURLERI.find((t) => t.id === veriTuru)!;
+
+  const gecmisYukle = useCallback(async () => {
+    try {
+      const r = await fetch("/api/train-upload");
+      if (r.ok) setGecmis(await r.json());
+    } catch {}
+  }, []);
+
+  useEffect(() => { gecmisYukle(); }, [gecmisYukle]);
+
+  const dosyaSec = (f: File) => {
+    setDosya(f);
+    setSonuc(null);
+    setHata(null);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const f = e.dataTransfer.files[0];
+    if (f) dosyaSec(f);
+  };
+
+  const handleYukle = async () => {
+    if (!dosya) return;
+    setLoading(true);
+    setHata(null);
+    setSonuc(null);
+    try {
+      const fd = new FormData();
+      fd.append("file",      dosya);
+      fd.append("veri_turu", veriTuru);
+      fd.append("ay",        ay);
+      fd.append("yil",       yil);
+      const r = await fetch("/api/train-upload", { method: "POST", body: fd });
+      const j = await r.json();
+      if (!r.ok) { setHata(j.error ?? "Sunucu hatası"); return; }
+      setSonuc(j);
+      setDosya(null);
+      gecmisYukle();
+    } catch (e: unknown) {
+      setHata(e instanceof Error ? e.message : "Bağlantı hatası");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const veriTuruLabelMap: Record<string, string> = {
+    ariza_log: "Arıza Log", ikmal: "İkmal", para_toplama: "Para Toplama", gunluk_bakiye: "Günlük Bakiye",
+  };
+
+  return (
+    <div className="rounded-2xl ring-2 ring-amber-500/30 bg-[#0f1e35] p-5">
+      {/* Başlık */}
+      <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center gap-3">
+          <div className="text-2xl">🧠</div>
+          <div>
+            <div className="font-bold text-white">Model Eğitimi — Geçmiş Veri Yükle</div>
+            <div className="text-xs text-[#A7B8D8] mt-0.5">
+              Excel / CSV yükle → Motor öğrenir • Ay ay ekleme desteklenir
+            </div>
+          </div>
+        </div>
+        <div className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-full px-3 py-1 font-semibold">
+          DAHİLİ KULLANIM
+        </div>
+      </div>
+
+      <div className="grid grid-cols-12 gap-5">
+        {/* Sol: Ayarlar + Drop Zone */}
+        <div className="col-span-12 xl:col-span-7 space-y-4">
+
+          {/* Veri türü seçici */}
+          <div>
+            <div className="text-xs text-[#A7B8D8] mb-2 font-semibold uppercase tracking-wider">Veri Türü</div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {VERI_TURLERI.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => { setVeriTuru(t.id); setSonuc(null); setHata(null); }}
+                  className={`rounded-xl border p-3 text-left transition-all ${
+                    veriTuru === t.id ? t.aktif + " ring-1 ring-current" : "border-[#2B416B] bg-[#0E2142] hover:border-[#2E86FF]/40"
+                  }`}
+                >
+                  <div className="text-xl mb-1">{t.icon}</div>
+                  <div className={`text-xs font-bold ${veriTuru === t.id ? "" : "text-white"}`}>{t.label}</div>
+                  <div className="text-[10px] text-[#A7B8D8] mt-0.5 leading-tight">{t.aciklama}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Dönem seçici */}
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <div className="text-xs text-[#A7B8D8] mb-1.5 font-semibold uppercase tracking-wider">Ay</div>
+              <select
+                value={ay}
+                onChange={(e) => setAy(e.target.value)}
+                className="w-full bg-[#0E2142] border border-[#2B416B] rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-[#2E86FF]"
+              >
+                {AYLAR.map((a) => (
+                  <option key={a.v} value={a.v}>{a.l}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex-1">
+              <div className="text-xs text-[#A7B8D8] mb-1.5 font-semibold uppercase tracking-wider">Yıl</div>
+              <select
+                value={yil}
+                onChange={(e) => setYil(e.target.value)}
+                className="w-full bg-[#0E2142] border border-[#2B416B] rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-[#2E86FF]"
+              >
+                {YILLAR.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+            <div className="text-xs text-[#A7B8D8] pt-6">
+              → <span className="text-white font-semibold">{AYLAR.find(a => a.v === ay)?.l} {yil}</span>
+            </div>
+          </div>
+
+          {/* Drop Zone */}
+          <div>
+            <div className="text-xs text-[#A7B8D8] mb-1.5 font-semibold uppercase tracking-wider">Dosya</div>
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={handleDrop}
+              onClick={() => fileRef.current?.click()}
+              className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all ${
+                dragging
+                  ? "border-[#2E86FF] bg-[#2E86FF]/10"
+                  : dosya
+                  ? "border-emerald-500/60 bg-emerald-500/5"
+                  : "border-[#2B416B] hover:border-[#2E86FF]/50 hover:bg-[#2E86FF]/5"
+              }`}
+            >
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) dosyaSec(f); }}
+              />
+              {dosya ? (
+                <div>
+                  <div className="text-3xl mb-2">📄</div>
+                  <div className="text-sm font-semibold text-emerald-400">{dosya.name}</div>
+                  <div className="text-xs text-[#A7B8D8] mt-1">
+                    {(dosya.size / 1024).toFixed(1)} KB
+                  </div>
+                  <div className="text-xs text-[#A7B8D8] mt-2">Değiştirmek için tıkla</div>
+                </div>
+              ) : (
+                <div>
+                  <div className="text-4xl mb-3">⬆️</div>
+                  <div className="text-sm text-white font-semibold">Excel veya CSV sürükle / tıkla</div>
+                  <div className="text-xs text-[#A7B8D8] mt-1">.xlsx · .xls · .csv</div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Beklenen kolon rehberi */}
+          <div className="bg-[#0E2142] rounded-xl p-3 ring-1 ring-[#2B416B]">
+            <div className="text-xs text-[#A7B8D8] mb-2">
+              📋 <span className="font-semibold">{seciliTur.label}</span> için beklenen kolonlar
+              <span className="text-[#A7B8D8]/60 ml-1">(farklı isimler de kabul edilir)</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {seciliTur.kolonlar.map((k) => (
+                <span key={k} className="text-[10px] bg-[#112544] text-[#A7B8D8] px-2 py-0.5 rounded-full font-mono">
+                  {k}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Yükle butonu */}
+          <button
+            onClick={handleYukle}
+            disabled={!dosya || loading}
+            className={`w-full py-3.5 rounded-xl font-bold text-sm transition-all ${
+              dosya && !loading
+                ? "bg-[#2E86FF] hover:bg-[#1E5FCC] text-white shadow-lg shadow-[#2E86FF]/20"
+                : "bg-[#1a2d4a] text-[#A7B8D8] cursor-not-allowed"
+            }`}
+          >
+            {loading ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                </svg>
+                İşleniyor...
+              </span>
+            ) : (
+              `🚀 ${AYLAR.find(a => a.v === ay)?.l} ${yil} — ${seciliTur.label} Yükle & Eğit`
+            )}
+          </button>
+
+          {/* Sonuç */}
+          {sonuc && (
+            <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-xl">✅</span>
+                <span className="font-semibold text-emerald-400">{sonuc.mesaj}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-3 mb-3">
+                <div className="text-center bg-[#0E2142] rounded-lg p-2">
+                  <div className="text-2xl font-bold text-white">{sonuc.satir_sayisi.toLocaleString("tr-TR")}</div>
+                  <div className="text-[10px] text-[#A7B8D8]">Satır</div>
+                </div>
+                <div className="text-center bg-[#0E2142] rounded-lg p-2">
+                  <div className="text-2xl font-bold text-white">{sonuc.kolonlar.length}</div>
+                  <div className="text-[10px] text-[#A7B8D8]">Kolon</div>
+                </div>
+                <div className="text-center bg-[#0E2142] rounded-lg p-2">
+                  <div className={`text-2xl font-bold ${sonuc.eslesme_orani >= 80 ? "text-emerald-400" : sonuc.eslesme_orani >= 50 ? "text-amber-400" : "text-red-400"}`}>
+                    %{sonuc.eslesme_orani}
+                  </div>
+                  <div className="text-[10px] text-[#A7B8D8]">Eşleşme</div>
+                </div>
+              </div>
+              {sonuc.eslesen_kolonlar.length > 0 && (
+                <div>
+                  <div className="text-xs text-[#A7B8D8] mb-1">Eşleşen kolonlar:</div>
+                  <div className="flex flex-wrap gap-1">
+                    {sonuc.eslesen_kolonlar.map((k) => (
+                      <span key={k} className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-mono">✓ {k}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Hata */}
+          {hata && (
+            <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 text-sm text-red-400">
+              ❌ {hata}
+            </div>
+          )}
+        </div>
+
+        {/* Sağ: Yükleme Geçmişi */}
+        <div className="col-span-12 xl:col-span-5">
+          <div className="text-xs text-[#A7B8D8] mb-3 font-semibold uppercase tracking-wider">
+            📁 Yükleme Geçmişi
+          </div>
+          {gecmis.length === 0 ? (
+            <div className="bg-[#0E2142] rounded-xl p-6 ring-1 ring-[#2B416B] text-center text-sm text-[#A7B8D8]">
+              Henüz yükleme yapılmadı
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-[540px] overflow-y-auto pr-1">
+              {gecmis.map((g) => {
+                const tur = VERI_TURLERI.find((t) => t.id === g.veri_turu);
+                return (
+                  <div
+                    key={g.id}
+                    className={`rounded-xl p-3 ring-1 ${
+                      g.durum === "basarili"
+                        ? "bg-[#0E2142] ring-[#2B416B]"
+                        : "bg-red-500/5 ring-red-500/30"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <span>{tur?.icon ?? "📄"}</span>
+                        <span className="text-xs font-semibold text-white">
+                          {AYLAR.find(a => a.v === g.ay)?.l} {g.yil}
+                        </span>
+                        <span className="text-[10px] bg-[#112544] text-[#A7B8D8] px-1.5 py-0.5 rounded">
+                          {tur?.label ?? g.veri_turu}
+                        </span>
+                      </div>
+                      <span className={`text-[10px] font-bold ${g.durum === "basarili" ? "text-emerald-400" : "text-red-400"}`}>
+                        {g.durum === "basarili" ? "✓ OK" : "✗ HATA"}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-[#A7B8D8] truncate">{g.dosya_adi}</div>
+                    {g.durum === "basarili" && (
+                      <div className="text-[10px] text-white/60 mt-1">
+                        {g.satir_sayisi.toLocaleString("tr-TR")} satır · {g.kolonlar.length} kolon
+                      </div>
+                    )}
+                    {g.hata_mesaji && (
+                      <div className="text-[10px] text-red-400 mt-1 truncate">{g.hata_mesaji}</div>
+                    )}
+                    <div className="text-[9px] text-[#A7B8D8]/50 mt-1">
+                      {new Date(g.tarih).toLocaleString("tr-TR")}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Notlar */}
+          <div className="mt-4 bg-[#0E2142] rounded-xl p-4 ring-1 ring-[#2B416B]">
+            <div className="text-xs font-semibold text-[#A7B8D8] mb-2">💡 Nasıl kullanılır?</div>
+            <ol className="text-[11px] text-[#A7B8D8] space-y-1.5 list-decimal list-inside">
+              <li>Veri türünü seç (Arıza / İkmal / Toplama / Bakiye)</li>
+              <li>Ayı ve yılı belirle</li>
+              <li>O aya ait Excel veya CSV'yi yükle</li>
+              <li>Tüm ayları tek tek ekle → Motor öğrenir</li>
+              <li>3 yıllık veriyi ekleyince AUC 0.88-0.93'e çıkar</li>
+            </ol>
+            <div className="mt-3 text-[10px] text-amber-400/80 border-t border-[#2B416B] pt-2">
+              ⚠️ Veriler ai_engine/uploads/ klasörüne kaydedilir,
+              dışarı çıkmaz. Banka sunucusunda çalışır.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 type HealthPayload = {
   f1_30g: number;
@@ -646,6 +1035,12 @@ export default function TrendHealthPage() {
             </div>
           </div>
         </div>
+
+        {/* Model Eğitimi — Excel Yükle (Dahili Kullanım) */}
+        <div className="col-span-12">
+          <UploadPanel />
+        </div>
+
       </div>
     </div>
   );

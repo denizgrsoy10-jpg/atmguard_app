@@ -2282,7 +2282,7 @@ Otomatik Eskalasyon Sistemi
         </div>
 
         {/* KPI Kartları */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           {/* Bugünkü Arıza */}
           <div className="bg-gradient-to-br from-[#EF4444]/10 to-[#DC2626]/5 rounded-xl p-5 ring-1 ring-[#EF4444]/30 hover:ring-[#EF4444]/60 transition-all hover:scale-105">
             <div className="flex items-center justify-between mb-3">
@@ -2325,6 +2325,32 @@ Otomatik Eskalasyon Sistemi
               <div className="flex justify-between">
                 <span className="text-[#A7B8D8]">SLA Aşım:</span>
                 <span className="text-[#EF4444] font-bold">3 ATM</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Arıza Bildirim Süresi */}
+          <div className="bg-gradient-to-br from-[#8B5CF6]/10 to-[#7C3AED]/5 rounded-xl p-5 ring-1 ring-[#8B5CF6]/30 hover:ring-[#8B5CF6]/60 transition-all hover:scale-105">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm text-[#A7B8D8]">Arıza Bildirim Süresi</div>
+              <div className="text-2xl">📞</div>
+            </div>
+            <div className="flex items-baseline gap-1 mb-3">
+              <div className="text-4xl font-bold text-white">12</div>
+              <div className="text-lg text-[#A7B8D8]">dk</div>
+            </div>
+            <div className="flex items-center gap-2 text-xs mb-3">
+              <span className="text-[#10B981]">↓ 3 dk</span>
+              <span className="text-[#A7B8D8]">daha hızlı</span>
+            </div>
+            <div className="space-y-1 text-xs">
+              <div className="flex justify-between">
+                <span className="text-[#A7B8D8]">En Hızlı:</span>
+                <span className="text-[#10B981] font-bold">3 dk</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[#A7B8D8]">En Yavaş:</span>
+                <span className="text-[#EF4444] font-bold">28 dk</span>
               </div>
             </div>
           </div>

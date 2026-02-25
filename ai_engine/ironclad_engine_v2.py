@@ -278,7 +278,7 @@ class IronCladEngineV2:
             }
 
             if task == "classification":
-                model = xgb.XGBClassifier(**params, random_state=42, use_label_encoder=False)
+                model = xgb.XGBClassifier(**params, random_state=42)
                 model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
                 preds = model.predict_proba(X_val)[:, 1]
                 return roc_auc_score(y_val, preds)
@@ -461,14 +461,21 @@ class IronCladEngineV2:
                 "cat": cat_params_fail,
             }
         else:
-            # Use default good params
-            xgb_params_fail = {"max_depth": 6, "learning_rate": 0.05, "n_estimators": 200}
-            lgb_params_fail = {"num_leaves": 50, "learning_rate": 0.05, "n_estimators": 200}
-            cat_params_fail = {"depth": 6, "learning_rate": 0.05, "iterations": 200}
+            # Default params — class imbalance düzeltmesi dahil
+            # scale_pos_weight = (negatif sayısı / pozitif sayısı) → dengesizliği dengeler
+            n_pos = int(y_fail_train.sum())
+            n_neg = len(y_fail_train) - n_pos
+            spw = max(1.0, n_neg / (n_pos + 1e-9))  # 0'a bölmeyi önle
+            xgb_params_fail = {"max_depth": 6, "learning_rate": 0.05, "n_estimators": 200,
+                               "scale_pos_weight": spw}  # ← arıza sınıfını ağırlıklandır
+            lgb_params_fail = {"num_leaves": 50, "learning_rate": 0.05, "n_estimators": 200,
+                               "is_unbalance": True}        # ← LightGBM imbalance modu
+            cat_params_fail = {"depth": 6, "learning_rate": 0.05, "iterations": 200,
+                               "auto_class_weights": "Balanced"}  # ← CatBoost otomatik denge
 
         # Train XGBoost
         print("\n  📦 Training XGBoost (Failure)...")
-        self.xgb_failure_model = xgb.XGBClassifier(**xgb_params_fail, random_state=42, use_label_encoder=False)
+        self.xgb_failure_model = xgb.XGBClassifier(**xgb_params_fail, random_state=42)
         self.xgb_failure_model.fit(X_train, y_fail_train, eval_set=[(X_val, y_fail_val)], verbose=False)
         xgb_fail_pred = self.xgb_failure_model.predict_proba(X_val)[:, 1]
 
@@ -556,7 +563,13 @@ class IronCladEngineV2:
         # Metrics
         cash_mae = mean_absolute_error(y_cash_val, ensemble_cash_pred)
         cash_rmse = np.sqrt(mean_squared_error(y_cash_val, ensemble_cash_pred))
-        cash_mape = np.mean(np.abs((y_cash_val - ensemble_cash_pred) / (y_cash_val + 1e-8))) * 100
+        # MAPE: sıfıra yakın gerçek değerler bölme hatasına neden olur — filtrele
+        _cash_mask = y_cash_val > 1.0
+        if _cash_mask.sum() > 0:
+            cash_mape = np.mean(np.abs((y_cash_val[_cash_mask] - ensemble_cash_pred[_cash_mask])
+                                       / y_cash_val[_cash_mask])) * 100
+        else:
+            cash_mape = 0.0
 
         print("\n  📊 CASH FORECASTING RESULTS:")
         print(f"     MAE:  {cash_mae:.2f} hours")
@@ -598,7 +611,12 @@ class IronCladEngineV2:
         # Metrics
         dep_mae = mean_absolute_error(y_dep_val, ensemble_dep_pred)
         dep_rmse = np.sqrt(mean_squared_error(y_dep_val, ensemble_dep_pred))
-        dep_mape = np.mean(np.abs((y_dep_val - ensemble_dep_pred) / (y_dep_val + 1e-8))) * 100
+        _dep_mask = y_dep_val > 1.0
+        if _dep_mask.sum() > 0:
+            dep_mape = np.mean(np.abs((y_dep_val[_dep_mask] - ensemble_dep_pred[_dep_mask])
+                                       / y_dep_val[_dep_mask])) * 100
+        else:
+            dep_mape = 0.0
 
         print("\n  📊 DEPOSIT FORECASTING RESULTS:")
         print(f"     MAE:  {dep_mae:.2f} hours")
@@ -806,7 +824,35 @@ class IronCladEngineV2:
                 self.cat_failure_model.load_model(str(self.cat_failure_path))
                 print("✓ CatBoost failure model loaded")
 
-            # (Similar for cash and deposit models - add as needed)
+            # ── Cash models (Regression) ──────────────────────────────────
+            if self.xgb_cash_path.exists():
+                self.xgb_cash_model = xgb.XGBRegressor()
+                self.xgb_cash_model.load_model(str(self.xgb_cash_path))
+                print("✓ XGBoost cash model loaded")
+
+            if self.lgb_cash_path.exists():
+                self.lgb_cash_model = lgb.Booster(model_file=str(self.lgb_cash_path))
+                print("✓ LightGBM cash model loaded")
+
+            if self.cat_cash_path.exists():
+                self.cat_cash_model = cb.CatBoostRegressor()
+                self.cat_cash_model.load_model(str(self.cat_cash_path))
+                print("✓ CatBoost cash model loaded")
+
+            # ── Deposit models (Regression) ───────────────────────────────
+            if self.xgb_deposit_path.exists():
+                self.xgb_deposit_model = xgb.XGBRegressor()
+                self.xgb_deposit_model.load_model(str(self.xgb_deposit_path))
+                print("✓ XGBoost deposit model loaded")
+
+            if self.lgb_deposit_path.exists():
+                self.lgb_deposit_model = lgb.Booster(model_file=str(self.lgb_deposit_path))
+                print("✓ LightGBM deposit model loaded")
+
+            if self.cat_deposit_path.exists():
+                self.cat_deposit_model = cb.CatBoostRegressor()
+                self.cat_deposit_model.load_model(str(self.cat_deposit_path))
+                print("✓ CatBoost deposit model loaded")
 
             if self.scaler_path.exists():
                 with open(self.scaler_path, "rb") as f:

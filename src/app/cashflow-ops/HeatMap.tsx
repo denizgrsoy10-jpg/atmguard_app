@@ -16,17 +16,35 @@ type AtmData = {
 };
 
 // Categorize ATMs by cash level
-function getCashCategory(cashLevel: number): "Critical" | "Low" | "Moderate" {
-  if (cashLevel < 20) return "Critical";
-  if (cashLevel < 30) return "Low";
-  return "Moderate";
+function getCashCategory(cashLevel: number, isHighCash: boolean): "Critical" | "Low" | "Moderate" {
+  if (isHighCash) {
+    // Para toplama (yüksek nakit)
+    if (cashLevel > 95) return "Critical"; // >95% kritik
+    if (cashLevel > 90) return "Low"; // 90-95% yüksek
+    return "Moderate"; // <90% normal
+  } else {
+    // İkmal (düşük nakit)
+    if (cashLevel < 20) return "Critical";
+    if (cashLevel < 30) return "Low";
+    return "Moderate";
+  }
 }
 
 // Create custom marker icons based on cash level
-function createMarkerIcon(cashLevel: number) {
-  let color = "#2E86FF"; // Blue for critical
-  if (cashLevel >= 20) color = "#F2B705"; // Yellow for low
-  if (cashLevel >= 30) color = "#10B981"; // Green for moderate
+function createMarkerIcon(cashLevel: number, isHighCash: boolean) {
+  let color = "#2E86FF"; // Blue
+  
+  if (isHighCash) {
+    // Para toplama renkleri (yüksek nakit)
+    if (cashLevel > 95) color = "#EF4444"; // Red for critical (>95%)
+    else if (cashLevel > 90) color = "#F59E0B"; // Orange for high (90-95%)
+    else color = "#10B981"; // Green for normal
+  } else {
+    // İkmal renkleri (düşük nakit)
+    if (cashLevel < 20) color = "#2E86FF"; // Blue for critical
+    else if (cashLevel < 30) color = "#F2B705"; // Yellow for low
+    else color = "#10B981"; // Green for moderate
+  }
 
   const isCritical = cashLevel < 20;
   const animationStyle = isCritical 
@@ -85,20 +103,30 @@ function HeatLayer({ lowCashAtms }: { lowCashAtms: AtmData[] }) {
   return null;
 }
 
-export default function HeatMap({ lowCashAtms }: { lowCashAtms: AtmData[] }) {
+export default function HeatMap({ lowCashAtms, isHighCash = false }: { lowCashAtms: AtmData[]; isHighCash?: boolean }) {
   const [selectedCategories, setSelectedCategories] = useState<string[]>(["Critical", "Low", "Moderate"]);
 
   // Turkey center coordinates
   const center: [number, number] = [39.0, 35.0];
 
   // Categorize ATMs
-  const criticalAtms = lowCashAtms.filter(a => a.cash_level < 20);
-  const lowAtms = lowCashAtms.filter(a => a.cash_level >= 20 && a.cash_level < 30);
-  const moderateAtms = lowCashAtms.filter(a => a.cash_level >= 30);
+  const criticalAtms = isHighCash 
+    ? lowCashAtms.filter(a => a.cash_level > 95)
+    : lowCashAtms.filter(a => a.cash_level < 20);
+    
+  const lowAtms = isHighCash
+    ? lowCashAtms.filter(a => a.cash_level > 90 && a.cash_level <= 95)
+    : lowCashAtms.filter(a => a.cash_level >= 20 && a.cash_level < 30);
+    
+  const moderateAtms = isHighCash
+    ? lowCashAtms.filter(a => a.cash_level <= 90)
+    : lowCashAtms.filter(a => a.cash_level >= 30);
 
   // Filter ATMs based on selected categories
   const filteredAtms = lowCashAtms.filter(atm => {
-    const category = getCashCategory(atm.cash_level);
+    const category = isHighCash
+      ? (atm.cash_level > 95 ? "Critical" : atm.cash_level > 90 ? "Low" : "Moderate")
+      : (atm.cash_level < 20 ? "Critical" : atm.cash_level < 30 ? "Low" : "Moderate");
     return selectedCategories.includes(category);
   });
 
@@ -185,7 +213,7 @@ export default function HeatMap({ lowCashAtms }: { lowCashAtms: AtmData[] }) {
           <Marker
             key={atm.atm_id}
             position={[atm.latitude, atm.longitude]}
-            icon={createMarkerIcon(atm.cash_level)}
+            icon={createMarkerIcon(atm.cash_level, isHighCash)}
           >
             <Popup>
               <div style={{ minWidth: "180px" }}>
@@ -197,13 +225,15 @@ export default function HeatMap({ lowCashAtms }: { lowCashAtms: AtmData[] }) {
                 <div style={{ 
                   fontSize: "13px", 
                   fontWeight: "bold",
-                  color: atm.cash_level < 20 ? "#2E86FF" : atm.cash_level < 30 ? "#F2B705" : "#10B981",
+                  color: isHighCash 
+                    ? (atm.cash_level > 95 ? "#EF4444" : atm.cash_level > 90 ? "#F59E0B" : "#10B981")
+                    : (atm.cash_level < 20 ? "#2E86FF" : atm.cash_level < 30 ? "#F2B705" : "#10B981"),
                   marginTop: "6px"
                 }}>
                   Cash Level: {atm.cash_level}%
                 </div>
                 <div style={{ fontSize: "11px", opacity: 0.7, marginTop: "2px" }}>
-                  {getCashCategory(atm.cash_level)} - Replenishment needed
+                  {getCashCategory(atm.cash_level, isHighCash)} - {isHighCash ? "Collection needed" : "Replenishment needed"}
                 </div>
               </div>
             </Popup>

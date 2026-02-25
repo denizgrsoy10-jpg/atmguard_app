@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional, Any
+from collections import OrderedDict
 from dataclasses import dataclass, asdict
 import warnings
 warnings.filterwarnings('ignore')
@@ -193,7 +194,7 @@ class UltraFinCashEngine:
        - Fraud detection
     """
     
-    def __init__(self, data_path: str = 'kasa_durum_raporu.json'):
+    def __init__(self, data_path: str = '../kasa_durum_raporu.json'):
         """Initialize Ultra Engine"""
         
         print("=" * 80)
@@ -205,6 +206,8 @@ class UltraFinCashEngine:
         self.models = {}
         self.scalers = {}
         self.training_history = []
+        # LSTM per-ATM model cache (train once, reuse across calls)
+        self._lstm_cache: Dict[str, Any] = {}
         
         # Model availability flags
         self.available_models = {
@@ -371,96 +374,98 @@ class UltraFinCashEngine:
         return predictions, confidence
     
     def _predict_with_lstm(self, atm_data: pd.Series, days: int = 7) -> Tuple[List[float], float]:
-        """LSTM Neural Network prediction"""
+        """LSTM Neural Network prediction — ATM bazlı cache ile her çağrıda sıfırdan eğitilmez."""
         
         if not self.available_models['lstm']:
             return [0] * days, 0.0
+        
+        atm_id = str(atm_data.get('ATM ID', 'unknown'))
+        lookback = 3
         
         # Prepare sequence
         sequence = np.array([atm_data[col] for col in self.withdrawal_cols])
         sequence = sequence.reshape(-1, 1)
         
-        # Scale
-        scaler = MinMaxScaler(feature_range=(0, 1))
-        scaled_sequence = scaler.fit_transform(sequence)
+        # Check cache first — avoid retraining for the same ATM
+        if atm_id in self._lstm_cache:
+            cached = self._lstm_cache[atm_id]
+            model = cached['model']
+            scaler = cached['scaler']
+        else:
+            # Scale
+            scaler = MinMaxScaler(feature_range=(0, 1))
+            scaled_sequence = scaler.fit_transform(sequence)
+            
+            # Build training data
+            X_train = []
+            y_train = []
+            for i in range(lookback, len(scaled_sequence)):
+                X_train.append(scaled_sequence[i-lookback:i, 0])
+                y_train.append(scaled_sequence[i, 0])
+            
+            if len(X_train) == 0:
+                return [0] * days, 0.0
+            
+            X_tr = np.array(X_train).reshape(len(X_train), lookback, 1)
+            y_tr = np.array(y_train)
+            
+            # Build and train LSTM
+            model = Sequential([
+                LSTM(50, activation='relu', return_sequences=True, input_shape=(lookback, 1)),
+                Dropout(0.2),
+                LSTM(50, activation='relu'),
+                Dropout(0.2),
+                Dense(25, activation='relu'),
+                Dense(1)
+            ])
+            model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+            
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore')
+                model.fit(X_tr, y_tr, epochs=50, batch_size=1, verbose=0)
+            
+            # Cache the trained model
+            self._lstm_cache[atm_id] = {'model': model, 'scaler': scaler}
         
-        # Build LSTM model
-        model = Sequential([
-            LSTM(50, activation='relu', return_sequences=True, input_shape=(len(sequence), 1)),
-            Dropout(0.2),
-            LSTM(50, activation='relu'),
-            Dropout(0.2),
-            Dense(25, activation='relu'),
-            Dense(1)
-        ])
-        
-        model.compile(optimizer='adam', loss='mse', metrics=['mae'])
-        
-        # Create training data (using sequence to predict next value)
-        X_train = []
-        y_train = []
-        lookback = 3
-        
-        for i in range(lookback, len(scaled_sequence)):
-            X_train.append(scaled_sequence[i-lookback:i, 0])
-            y_train.append(scaled_sequence[i, 0])
-        
-        if len(X_train) == 0:
-            return [0] * days, 0.0
-        
-        X_train = np.array(X_train)
-        y_train = np.array(y_train)
-        X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], 1)
-        
-        # Train (quick fit)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            model.fit(X_train, y_train, epochs=50, batch_size=1, verbose=0)
+        # Always re-scale with current sequence for fresh prediction
+        scaled_sequence = scaler.transform(sequence)
         
         # Predict future
         predictions = []
         current_sequence = scaled_sequence[-lookback:].flatten().tolist()
         
         for _ in range(days):
-            # Prepare input
             x_input = np.array(current_sequence[-lookback:]).reshape(1, lookback, 1)
-            
-            # Predict
             pred_scaled = model.predict(x_input, verbose=0)[0, 0]
-            
-            # Inverse transform
             pred = scaler.inverse_transform([[pred_scaled]])[0, 0]
             predictions.append(max(0, pred))
-            
-            # Update sequence
             current_sequence.append(pred_scaled)
         
         # Confidence based on training loss
-        confidence = 0.85  # LSTM typically has good confidence
+        confidence = 0.85
         
         return predictions, confidence
     
     def _predict_with_xgboost(self, atm_data: pd.Series, days: int = 7) -> Tuple[List[float], float]:
-        """XGBoost prediction"""
+        """XGBoost prediction — in-sample R² ile gerçek confidence hesabı."""
         
         if not self.available_models['xgboost']:
             return [0] * days, 0.0
         
-        # Create features
+        # Create sliding window features
         X_train = []
         y_train = []
-        
-        # Use sliding window
         sequence = [atm_data[col] for col in self.withdrawal_cols]
-        for i in range(3, len(sequence)):
-            X_train.append(sequence[i-3:i])
+        lookback = 3
+        for i in range(lookback, len(sequence)):
+            X_train.append(sequence[i-lookback:i])
             y_train.append(sequence[i])
         
         if len(X_train) == 0:
             return [0] * days, 0.0
         
-        X_train = np.array(X_train)
-        y_train = np.array(y_train)
+        X_arr = np.array(X_train)
+        y_arr = np.array(y_train)
         
         # Train XGBoost
         model = xgb.XGBRegressor(
@@ -469,21 +474,31 @@ class UltraFinCashEngine:
             learning_rate=0.1,
             random_state=42
         )
+        model.fit(X_arr, y_arr)
         
-        model.fit(X_train, y_train)
+        # Gerçek R² — in-sample fit quality (overfit olsa da tahminin tutarlılığını ölçer)
+        y_pred_train = model.predict(X_arr)
+        ss_res = np.sum((y_arr - y_pred_train) ** 2)
+        ss_tot = np.sum((y_arr - np.mean(y_arr)) ** 2)
+        real_r2 = float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
+        real_r2 = max(0.0, min(1.0, real_r2))
         
-        # Predict
+        # Confidence derived from R²
+        confidence = 0.5 + real_r2 * 0.45  # 0.50 → 0.95 aralığında
+        
+        # Store r2 for use in predict_ultra
+        self._last_xgboost_r2 = real_r2
+        
+        # Predict future
         predictions = []
-        current_window = sequence[-3:]
+        current_window = list(sequence[-lookback:])
         
         for _ in range(days):
             X_pred = np.array([current_window])
-            pred = model.predict(X_pred)[0]
+            pred = float(model.predict(X_pred)[0])
             pred = max(0, pred)
             predictions.append(pred)
             current_window = current_window[1:] + [pred]
-        
-        confidence = 0.88  # XGBoost confidence
         
         return predictions, confidence
     
@@ -612,7 +627,7 @@ class UltraFinCashEngine:
             best_model=best_model,
             confidence_scores=[confidences.get(m, 0) for m in ['prophet', 'lstm', 'xgboost']],
             accuracy_estimate=confidences[best_model],
-            r2_score=0.92,
+            r2_score=getattr(self, '_last_xgboost_r2', 0.0),  # XGBoost in-sample R²
             predicted_balance=predicted_balance[1:],
             predicted_deposits=predicted_deposits,
             risk_level=risk_level,

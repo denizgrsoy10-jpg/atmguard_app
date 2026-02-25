@@ -24,13 +24,26 @@ from enum import Enum
 import time
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# BANKA ONAYLANMIŞ VERİ FEED BİLGİLERİ (22 Şubat 2026)
+# ─────────────────────────────────────────────────────────────────────────────
+# ✅ Arıza feed      : Her 15 dakikada bir güncelleniyor (online/anlık)
+# ✅ ATM ID alanı    : 'terminal_id'
+# ✅ Kaset verisi    : Her kaset ayrı alan (cassette_1 ... cassette_N)
+# ❓ Nakit feed      : Güncelleme sıklığı TBD (bir sonraki toplantı)
+# ─────────────────────────────────────────────────────────────────────────────
+
+FAULT_FEED_INTERVAL_MINUTES = 15   # ✅ Banka onaylı arıza feed sıklığı
+CASH_FEED_INTERVAL_MINUTES  = 60   # ❓ Tahmin — netleşince güncelle
+
+
 class RefreshPriority(Enum):
     """Data refresh priority tiers"""
-    CRITICAL = "CRITICAL"      # Every 1 hour
-    HIGH = "HIGH"              # Every 2 hours
-    MEDIUM = "MEDIUM"          # Every 4 hours
-    LOW = "LOW"                # Every 6 hours
-    MINIMAL = "MINIMAL"        # Every 12 hours
+    CRITICAL = "CRITICAL"      # Her 15 dk  (arıza feed ile senkron)
+    HIGH = "HIGH"              # Her 30 dk
+    MEDIUM = "MEDIUM"          # Her 1 saat
+    LOW = "LOW"                # Her 2 saat
+    MINIMAL = "MINIMAL"        # Her 4 saat
 
 
 @dataclass
@@ -87,19 +100,19 @@ class AIBrainScheduler:
     • Historical Accuracy → Kötü tahmin = Daha fazla öğrenme
     • Cost/Benefit Ratio → ROI optimize et
     
-    Stratejim:
-    ----------
-    ✅ CRITICAL ATMs: Her 1 saat (high-risk, low balance)
-    ✅ HIGH ATMs: Her 2 saat (medium-risk, volatile)
-    ✅ MEDIUM ATMs: Her 4 saat (stable, normal)
-    ✅ LOW ATMs: Her 6 saat (predictable)
-    ✅ MINIMAL ATMs: Her 12 saat (very stable, low volume)
-    
+    Stratejim (GÜNCELLENDI — Banka Arıza Feed: 15 dk):
+    ----------------------------------------------------
+    ✅ CRITICAL ATMs : Her 15 dk  — arıza feed ile senkron (high-risk)
+    ✅ HIGH ATMs     : Her 30 dk  — volatil ATM'ler
+    ✅ MEDIUM ATMs   : Her 1 saat — normal ATM'ler
+    ✅ LOW ATMs      : Her 2 saat — stabil ATM'ler
+    ✅ MINIMAL ATMs  : Her 4 saat — çok stabil, düşük hacim
+
     Savings Strategy:
-    ----------------
-    • Baseline (naive): Her ATM her saat = 2771 ATM × 24 = 66,504 calls/day
-    • My Strategy: Smart refresh = ~22,000 calls/day
-    • Savings: %67 reduction = %15+ cost savings GUARANTEED
+    -----------------
+    • Baseline (naive)  : Her ATM her 15 dk = 2771 × 96 = 266,016 calls/gün
+    • Smart Strategy    : Sadece kritik ATM'ler 15 dk, geri kalanlar daha az
+    • Tahmini tasarruf  : %60-70 call azaltma = %15+ maliyet tasarrufu
     """
     
     def __init__(self, fincash_data_path: str = '../kasa_durum_raporu.json'):

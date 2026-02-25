@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import "leaflet/dist/leaflet.css";
@@ -108,6 +108,7 @@ export default function CashFlowOpsPage() {
   const [showReplModal, setShowReplModal] = useState(false);
   const [cashFlowView, setCashFlowView] = useState<"daily" | "weekly">("daily");
   const [lowCashAtms, setLowCashAtms] = useState<{ atm_id: string; atm_name: string; city: string; district: string; cash_level: number; latitude: number; longitude: number }[]>([]);
+  const [highCashAtms, setHighCashAtms] = useState<{ atm_id: string; atm_name: string; city: string; district: string; cash_level: number; latitude: number; longitude: number }[]>([]);
   const [shortageAtms, setShortageAtms] = useState<{ atm_id: string; atm_name: string; city: string; district: string; predicted_day: number }[]>([]);
   const [replAtms, setReplAtms] = useState<{ atm_id: string; atm_name: string; city: string; district: string; scheduled_day: string; priority: string }[]>([]);
   
@@ -123,11 +124,12 @@ export default function CashFlowOpsPage() {
   const [citRoutes, setCitRoutes] = useState<any[]>([]);
   const [allCashCenters, setAllCashCenters] = useState<any[]>([]);
   const [allCashCenterGroups, setAllCashCenterGroups] = useState<[string, any[]][]>([]);
-  const [selectedCashCenter, setSelectedCashCenter] = useState<string>("");
+  const [selectedCashCenter, setSelectedCashCenter] = useState<string>(""); // "" = Tüm NM'ler (active tab)
+  const [selectedNmTabs, setSelectedNmTabs] = useState<string[]>([]); // pinned NM tabs
   const [showCashCenterSearch, setShowCashCenterSearch] = useState(false);
   const [cashCenterSearchTerm, setCashCenterSearchTerm] = useState("");
   const [routeDateStart, setRouteDateStart] = useState<string>("2026-02-04");
-  const [routeDateEnd, setRouteDateEnd] = useState<string>("2026-02-04");
+  const [routeDateEnd, setRouteDateEnd] = useState<string>("2026-02-10");
   const [selectedRoute, setSelectedRoute] = useState<any>(null);
   const [showRouteMapModal, setShowRouteMapModal] = useState(false);
   const [showRouteOptimizeModal, setShowRouteOptimizeModal] = useState(false);
@@ -143,7 +145,12 @@ export default function CashFlowOpsPage() {
   const [showOperationMapModal, setShowOperationMapModal] = useState(false);
   const [operationAtms, setOperationAtms] = useState<any[]>([]);
   const [showAllRouteAtms, setShowAllRouteAtms] = useState(false);
+  const [expandedRoutes, setExpandedRoutes] = useState<Set<string>>(new Set());
+  const [expandedMapAtms, setExpandedMapAtms] = useState<Set<string>>(new Set());
+  const [expandedWorkOrderAtms, setExpandedWorkOrderAtms] = useState<Set<string>>(new Set());
   const [showAllNmSlaModal, setShowAllNmSlaModal] = useState(false);
+  const [showAllActions, setShowAllActions] = useState(false);
+  const [expandedSlaAtms, setExpandedSlaAtms] = useState<Set<string>>(new Set());
   const [showRemainingRoutesModal, setShowRemainingRoutesModal] = useState(false);
   const [remainingRoutesData, setRemainingRoutesData] = useState<any[]>([]);
   const [slaDateStart, setSlaDateStart] = useState<string>("2026-02-01");
@@ -165,17 +172,116 @@ export default function CashFlowOpsPage() {
   const [heatMapStartDate, setHeatMapStartDate] = useState<string>("2026-02-01");
   const [heatMapEndDate, setHeatMapEndDate] = useState<string>("2026-02-04");
   const [fullscreenHeatMap, setFullscreenHeatMap] = useState(false);
+  const [heatMapView, setHeatMapView] = useState<"low_cash" | "high_cash">("low_cash"); // İkmal veya Para Toplama
   
   // Otomatik Öneriler collapsible state
   const [autoSuggestionsExpanded, setAutoSuggestionsExpanded] = useState(false);
+  const [suggestionsDateStart, setSuggestionsDateStart] = useState<string>(
+    new Date().toISOString().slice(0, 10)
+  );
+  const [suggestionsDateEnd, setSuggestionsDateEnd] = useState<string>(
+    new Date(Date.now() + 2 * 86400_000).toISOString().slice(0, 10)
+  );
+
+  // Tüm öneri verisi — gerçek API bağlandığında buradan gelecek
+  const today = new Date().toISOString().slice(0, 10);
+  const d1    = new Date(Date.now() + 1 * 86400_000).toISOString().slice(0, 10);
+  const d2    = new Date(Date.now() + 2 * 86400_000).toISOString().slice(0, 10);
+  const d3    = new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10);
+  const d5    = new Date(Date.now() + 5 * 86400_000).toISOString().slice(0, 10);
+  const d6    = new Date(Date.now() + 6 * 86400_000).toISOString().slice(0, 10);
+
+  const allSuggestions = useMemo(() => [
+    { id: 1,  tarih: today, type: "collection",    atmId: "FA026", atmName: "BATI ATASEHIR SUBE 2",        city: "İstanbul",  district: "Ataşehir",  priority: "high",   reason: "Kaset %89 dolu (Cuma öğleden sonra maaş yoğunluğu tahmini)",            eta: "18:00",    confidence: 96 },
+    { id: 2,  tarih: today, type: "collection",    atmId: "FA032", atmName: "41 DARICA EMEK",              city: "Kocaeli",   district: "Darıca",    priority: "high",   reason: "Hafta sonu + Finbor lokasyonu, %91 doluluk",                       eta: "16:30",    confidence: 94 },
+    { id: 3,  tarih: today, type: "collection",    atmId: "FA025", atmName: "01 SARICAM H.SABANCI OSB",    city: "Adana",     district: "Sarıçam",   priority: "medium", reason: "Organize sanayi bölgesi - Cuma akşam yoğunluk paterni",             eta: "19:00",    confidence: 92 },
+    { id: 4,  tarih: d1,    type: "collection",    atmId: "FA034", atmName: "16 BURSA FOMARA",             city: "Bursa",     district: "Nilüfer",   priority: "high",   reason: "AVM lokasyonu - Cumartesi alışveriş yoğunluğu, %87 doluluk",          eta: "17:00",    confidence: 93 },
+    { id: 5,  tarih: d1,    type: "replenishment", atmId: "FA018", atmName: "07 ALANYA OTOGAR",            city: "Antalya",   district: "Alanya",    priority: "medium", reason: "Pazartesi sabahı tükenmeden önleyici ikmal",                           eta: "Pzr 22:00", confidence: 88 },
+    { id: 6,  tarih: d1,    type: "collection",    atmId: "FA023", atmName: "35 KONAK KEMERALT",           city: "İzmir",     district: "Konak",     priority: "high",   reason: "Tarihi çarşı bölgesi - Hafta sonu turist yoğunluğu, %90 doluluk",     eta: "15:30",    confidence: 95 },
+    { id: 7,  tarih: d2,    type: "replenishment", atmId: "FA006", atmName: "06 ANKARA KIZILAY",           city: "Ankara",    district: "Çankaya",   priority: "high",   reason: "Metro istasyonu - Pazartesi sabah trafiği öncesi kritik seviye",    eta: "Pzr 23:00", confidence: 91 },
+    { id: 8,  tarih: d2,    type: "collection",    atmId: "FA024", atmName: "41 GEBZE ORGANIZE",           city: "Kocaeli",   district: "Gebze",     priority: "medium", reason: "Sanayi bölgesi - Haftalık maaş ödemesi sonrası, %84 doluluk",          eta: "19:30",    confidence: 89 },
+    { id: 9,  tarih: d3,    type: "replenishment", atmId: "FA019", atmName: "01 ANTALYA HAVALIMANI",       city: "Antalya",   district: "Serik",     priority: "medium", reason: "Havaimanı - Pazar akşam uçuş yoğunluğu öncesi",                       eta: "Paz 20:00", confidence: 87 },
+    { id: 10, tarih: d3,    type: "collection",    atmId: "FA033", atmName: "27 S.BEY KARATAS PO 2",       city: "Gaziantep", district: "Şahinbey",  priority: "medium", reason: "Petrol ofisi - Hafta sonu seyahat trafiği, %86 doluluk",              eta: "18:30",    confidence: 90 },
+    { id: 11, tarih: d5,    type: "replenishment", atmId: "FA015", atmName: "16 KADIKOY ISKELE",           city: "İstanbul",  district: "Kadıköy",   priority: "low",    reason: "Vapur iskelesi - Pazartesi sabah yolcu yoğunluğu",                   eta: "Pzr 21:30", confidence: 85 },
+    { id: 12, tarih: d6,    type: "collection",    atmId: "FA028", atmName: "07 IZMIR ALSANCAK",           city: "İzmir",     district: "Konak",     priority: "medium", reason: "Tren garı yakını - Hafta sonu seyahat yoğunluğu, %88 doluluk",         eta: "17:30",    confidence: 91 },
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [today, d1, d2, d3, d5, d6]);
+
+  // AI Engine date range
+  const [aiEngineDateStart, setAiEngineDateStart] = useState<string>(
+    new Date().toISOString().slice(0, 10)
+  );
+  const [aiEngineDateEnd, setAiEngineDateEnd] = useState<string>(
+    new Date(Date.now() + 7 * 86400_000).toISOString().slice(0, 10)
+  );
 
   // AI Manual Override Rules
   const [manualCashLimit, setManualCashLimit] = useState<string>("350");
   const [manualRuleDescription, setManualRuleDescription] = useState<string>("");
 
+  // Nakit Toplu Veri Yükleme
+  const [cashBulkDragging,   setCashBulkDragging]   = useState(false);
+  const [cashBulkFile,       setCashBulkFile]        = useState<File | null>(null);
+  const [cashBulkVeriTuru,   setCashBulkVeriTuru]    = useState<string>('ikmal');
+  const [cashBulkAy,         setCashBulkAy]          = useState<string>(String(new Date().getMonth() + 1));
+  const [cashBulkYil,        setCashBulkYil]         = useState<string>(String(new Date().getFullYear()));
+  const [cashBulkStatus,     setCashBulkStatus]      = useState<'idle'|'uploading'|'success'|'error'>('idle');
+  const [cashBulkResult,     setCashBulkResult]      = useState<{
+    satir_sayisi: number;
+    kolonlar: string[];
+    eslesen_kolonlar: string[];
+    eslesme_orani: number;
+    beyin?: {
+      basarili?: boolean;
+      ogrenilen_atm?: number;
+      ogrenme_ozeti?: {
+        risk_skoru_guncellenen_atm: number;
+        eta_guncellenen_atm: number;
+        kronik_ariza_atm: number;
+        toplam_ogrenen_atm: number;
+      };
+      mesaj?: string;
+      uyari?: string;
+    } | null;
+  } | null>(null);
+  const [cashBulkHistory,    setCashBulkHistory]     = useState<{
+    dosya: string; veri_turu: string; tarih: string; satir: number; eslesme: number; beyin_atm: number;
+  }[]>([]);
+
   // AI Engine states
   const [aiEngineEnabled, setAiEngineEnabled] = useState<boolean>(false);
   const [aiEngineMode, setAiEngineMode] = useState<"auto" | "manual">("auto");
+  const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const formatTimeSince = useCallback((date: Date) => {
+    const diff = Math.floor((Date.now() - date.getTime()) / 1000);
+    if (diff < 60) return `${diff} sn önce`;
+    if (diff < 3600) return `${Math.floor(diff / 60)} dk önce`;
+    return `${Math.floor(diff / 3600)} sa önce`;
+  }, []);
+
+  const handleManualRefresh = useCallback(async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    // Gerçek API bağlandığında buraya fetch eklenecek
+    await new Promise((r) => setTimeout(r, 800));
+    setLastRefreshed(new Date());
+    setIsRefreshing(false);
+  }, [isRefreshing]);
+
+  // Otomatik modda her 2 dakikada bir yenile
+  useEffect(() => {
+    if (aiEngineMode === "auto") {
+      refreshIntervalRef.current = setInterval(() => {
+        setLastRefreshed(new Date());
+      }, 120_000);
+    }
+    return () => {
+      if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
+    };
+  }, [aiEngineMode]);
   const [aiEngineStatus, setAiEngineStatus] = useState<"active" | "optimizing" | "idle">("active");
 
   // SLA Times based on Zone and Operation Type (from contract)
@@ -291,6 +397,19 @@ export default function CashFlowOpsPage() {
       }));
       if (!alive) return;
       setLowCashAtms(lowCash);
+      
+      // High Cash ATMs (Para Toplama gerekli) - mock: cash level > 85%
+      const highCash = atms.slice(143, 167).map((a: any) => ({
+        atm_id: String(a.atm_id),
+        atm_name: a.atm_name || "N/A",
+        city: a.city,
+        district: a.district,
+        cash_level: Math.floor(Math.random() * 15) + 85, // Mock: 85-100% full
+        latitude: typeof a.latitude === 'string' ? parseFloat(a.latitude.replace(',', '.')) : a.latitude,
+        longitude: typeof a.longitude === 'string' ? parseFloat(a.longitude.replace(',', '.')) : a.longitude,
+      }));
+      setHighCashAtms(highCash);
+      
       setShortageAtms(shortage);
       setReplAtms(repl);
       
@@ -319,29 +438,45 @@ export default function CashFlowOpsPage() {
         offsite_count: atms.filter((a: any) => a.location_type === "Offsite").length
       })));
       
-      // Auto-select TOP 1 NM (en çok ATM'si olan)
+      // Auto-populate tabs with top 4 NMs; start with "Tüm NM'ler" view
       if (majorCashCenters.length > 0) {
-        setSelectedCashCenter(majorCashCenters[0][0]);
+        const topNms = majorCashCenters.slice(0, 4).map(([cc]) => cc as string);
+        setSelectedNmTabs(topNms);
+        setSelectedCashCenter(""); // Default: Tüm NM'ler tab active
       }
       
       // Calculate SLA exceeded ATMs (mock: ATMs with cash level < 20% for more than 3 days)
-      const slaExceeded = atms.slice(0, 23).map((a: any) => {
+      const slaExceeded = atms.slice(0, 23).map((a: any, i: number) => {
         const zone = a.zone || "3";
-        const isPlanned = Math.random() > 0.3; // 70% planlı operasyon
+        const isPlanned = (i % 10) > 2; // 70% planlı operasyon
         const slaTargetHours = getSlaHours(zone, isPlanned);
-        const hoursExceeded = Math.floor(Math.random() * 48) + slaTargetHours; // Exceeded by some hours
-        
+        const hoursExceeded = ((i * 13 + 7) % 48) + slaTargetHours;
+        const hasFx = i % 5 === 0;
+        const seed = String(a.atm_id).split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0);
+        const cassettes = hasFx ? [
+          { id: 1, currency: 'TRY', denomination: 200, quantity: 30 + (seed + 1) % 60 },
+          { id: 2, currency: 'TRY', denomination: 100, quantity: 20 + (seed + 2) % 50 },
+          { id: 3, currency: 'USD', denomination: 100, quantity: 15 + (seed + 3) % 35 },
+          { id: 4, currency: 'EUR', denomination:  50, quantity: 10 + (seed + 4) % 30 },
+        ] : [
+          { id: 1, currency: 'TRY', denomination: 200, quantity: 40 + (seed + 1) % 80 },
+          { id: 2, currency: 'TRY', denomination: 100, quantity: 30 + (seed + 2) % 70 },
+          { id: 3, currency: 'TRY', denomination:  50, quantity: 20 + (seed + 3) % 60 },
+          { id: 4, currency: 'TRY', denomination:  20, quantity: 10 + (seed + 4) % 40 },
+        ];
         return {
           atm_id: String(a.atm_id),
           atm_name: a.atm_name || "N/A",
           city: a.city,
           district: a.district,
           zone: zone,
-          cash_level: Math.floor(Math.random() * 15) + 5, // 5-20% remaining
+          cash_level: ((seed + i) % 15) + 5, // 5-20% remaining
           days_exceeded: Math.floor(hoursExceeded / 24) + 1,
           sla_target: slaTargetHours,
           hours_exceeded: hoursExceeded - slaTargetHours,
           operation_type: isPlanned ? "Planlı" : "Plansız",
+          hasFx,
+          cassettes,
           latitude: typeof a.latitude === 'string' ? parseFloat(a.latitude.replace(',', '.')) : a.latitude,
           longitude: typeof a.longitude === 'string' ? parseFloat(a.longitude.replace(',', '.')) : a.longitude,
         };
@@ -394,155 +529,210 @@ export default function CashFlowOpsPage() {
     };
   }, []);
 
-  // Generate routes based on selected cash center (ONLY 1 NM)
+  // Generate routes based on ALL pinned NM tabs
   useEffect(() => {
-    if (!allCashCenterGroups.length || !selectedCashCenter) return;
-    
-    // Find the selected cash center group
-    const selectedGroup = allCashCenterGroups.find(([cc]) => cc === selectedCashCenter);
-    if (!selectedGroup) return;
-    
-    const [cashCenter, centerAtms] = selectedGroup;
+    if (!allCashCenterGroups.length || !selectedNmTabs.length) return;
+
     const teams = ["Alpha", "Beta", "Gamma"];
     const vehicles = ["TR-34-ABC-123", "TR-06-XYZ-456", "TR-35-DEF-789"];
-    
-    // Create 3 routes for this NM: today, tomorrow, later
-    const routes = [];
-    
-    // Get all offsite ATMs for this cash center
-    const allOffsiteAtms = centerAtms.filter((a: any) => a.location_type === "Offsite");
-    
-    // If not enough ATMs, duplicate some to ensure all 3 routes have data
-    const minAtmsPerRoute = 8;
-    const requiredTotal = 40; // Need at least 40 to cover all slices
-    let workingAtms = [...allOffsiteAtms];
-    
-    // Duplicate ATMs multiple times if needed to ensure all routes have data
-    while (workingAtms.length < requiredTotal && allOffsiteAtms.length > 0) {
-      workingAtms = [...workingAtms, ...allOffsiteAtms];
-    }
-    
-    // If still not enough, keep duplicating until we have 40
-    if (workingAtms.length < requiredTotal && allOffsiteAtms.length > 0) {
-      const remaining = requiredTotal - workingAtms.length;
-      for (let i = 0; i < remaining; i++) {
-        workingAtms.push(allOffsiteAtms[i % allOffsiteAtms.length]);
+
+    const allRoutes: any[] = [];
+
+    selectedNmTabs.forEach((cashCenter) => {
+      const selectedGroup = allCashCenterGroups.find(([cc]) => cc === cashCenter);
+      if (!selectedGroup) return;
+
+      const [, centerAtms] = selectedGroup;
+
+      // Get all offsite ATMs for this cash center
+      const allOffsiteAtms = centerAtms.filter((a: any) => a.location_type === "Offsite");
+
+      // If not enough ATMs, duplicate some to ensure all 3 routes have data
+      const requiredTotal = 40;
+      let workingAtms = [...allOffsiteAtms];
+
+      while (workingAtms.length < requiredTotal && allOffsiteAtms.length > 0) {
+        workingAtms = [...workingAtms, ...allOffsiteAtms];
       }
-    }
-    
-    // Today route - Replenishment (İkmal)
-    const todayOffsiteAtms = workingAtms.slice(0, 15);
-    if (todayOffsiteAtms.length > 0) {
-      routes.push({
-        id: `R1-${cashCenter}`,
+
+      if (workingAtms.length < requiredTotal && allOffsiteAtms.length > 0) {
+        const remaining = requiredTotal - workingAtms.length;
+        for (let i = 0; i < remaining; i++) {
+          workingAtms.push(allOffsiteAtms[i % allOffsiteAtms.length]);
+        }
+      }
+
+      // Today route - Replenishment (İkmal)
+      const todayOffsiteAtms = workingAtms.slice(0, 15);
+      if (todayOffsiteAtms.length > 0) {
+        allRoutes.push({
+          id: `R1-${cashCenter}`,
+          name: `${cashCenter} NM Rotası`,
+          cash_center: cashCenter,
+          day: "today",
+          cit_company: "BANTAŞ",
+          team: `CIT Team ${teams[0]}`,
+          vehicle: vehicles[0],
+          operation_type: "replenishment",
+          status: "in-progress",
+          progress: 47,
+          atms_count: todayOffsiteAtms.length,
+          completed: 7,
+          efficiency_score: 82 + Math.floor(Math.random() * 12),
+          estimated_time: `${(todayOffsiteAtms.length * 0.25).toFixed(1)}h`,
+          total_cash: `₺${(todayOffsiteAtms.length * 380000 + Math.random() * 500000).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`,
+          atms: todayOffsiteAtms.map((a: any, i: number) => {
+            const hasFx = i % 5 === 0; // ~20% dövizli ATM
+            const cassettes = [
+              { id: 1, currency: hasFx ? 'TRY' : 'TRY', denomination: 200, quantity: 40 + ((String(a.atm_id).charCodeAt(0) || 70) + i) % 80 },
+              { id: 2, currency: hasFx ? 'TRY' : 'TRY', denomination: 100, quantity: 30 + ((String(a.atm_id).charCodeAt(1) || 65) + i) % 70 },
+              { id: 3, currency: hasFx ? 'USD' : 'TRY', denomination: hasFx ? 100 : 50, quantity: hasFx ? (15 + ((String(a.atm_id).charCodeAt(2) || 60) + i) % 35) : (20 + ((String(a.atm_id).charCodeAt(2) || 60) + i) % 60) },
+              { id: 4, currency: hasFx ? 'EUR' : 'TRY', denomination: hasFx ? 50 : 20, quantity: hasFx ? (10 + ((String(a.atm_id).charCodeAt(3) || 55) + i) % 30) : (10 + ((String(a.atm_id).charCodeAt(3) || 55) + i) % 40) },
+            ];
+            const tryTotal = cassettes.filter(c => c.currency === 'TRY').reduce((s, c) => s + c.denomination * c.quantity, 0);
+            const usdTotal = cassettes.filter(c => c.currency === 'USD').reduce((s, c) => s + c.denomination * c.quantity, 0);
+            const eurTotal = cassettes.filter(c => c.currency === 'EUR').reduce((s, c) => s + c.denomination * c.quantity, 0);
+            return {
+              ...a,
+              order: i + 1,
+              operation: 'ikmal',
+              amount: `₺${tryTotal.toLocaleString('tr-TR')}${usdTotal ? ` + $${usdTotal.toLocaleString('tr-TR')}` : ''}${eurTotal ? ` + €${eurTotal.toLocaleString('tr-TR')}` : ''}`,
+              hasFx,
+              cassettes,
+              planned: i % 3 !== 0,
+              sla_hours: getSlaHours(a.zone || '3', i % 3 !== 0),
+              zone: a.zone || '3',
+            };
+          }),
+        });
+      }
+
+      // Tomorrow route - Mixed (Karışık: ikmal + toplama)
+      const tomorrowOffsiteAtms = workingAtms.slice(15, 28);
+      if (tomorrowOffsiteAtms.length > 0) {
+        allRoutes.push({
+          id: `R2-${cashCenter}`,
+          name: `${cashCenter} NM Rotası`,
+          cash_center: cashCenter,
+          day: "tomorrow",
+          cit_company: "BANTAŞ",
+          team: `CIT Team ${teams[1]}`,
+          vehicle: vehicles[1],
+          operation_type: "mixed",
+          status: "planned",
+          progress: 0,
+          atms_count: tomorrowOffsiteAtms.length,
+          completed: 0,
+          efficiency_score: 78 + Math.floor(Math.random() * 10),
+          estimated_time: `${(tomorrowOffsiteAtms.length * 0.28).toFixed(1)}h`,
+          total_cash: `₺${(tomorrowOffsiteAtms.length * 420000 + Math.random() * 600000).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`,
+          atms: tomorrowOffsiteAtms.map((a: any, i: number) => {
+            const op = i % 3 === 0 ? 'toplama' : 'ikmal';
+            const hasFx = i % 6 === 0;
+            const cassettes = [
+              { id: 1, currency: 'TRY', denomination: 200, quantity: 35 + ((String(a.atm_id).charCodeAt(0) || 70) + i) % 75 },
+              { id: 2, currency: 'TRY', denomination: 100, quantity: 25 + ((String(a.atm_id).charCodeAt(1) || 65) + i) % 65 },
+              { id: 3, currency: hasFx ? 'USD' : 'TRY', denomination: hasFx ? 100 : 50, quantity: hasFx ? (12 + ((String(a.atm_id).charCodeAt(2) || 60) + i) % 38) : (15 + ((String(a.atm_id).charCodeAt(2) || 60) + i) % 55) },
+              { id: 4, currency: hasFx ? 'EUR' : 'TRY', denomination: hasFx ? 50 : 20, quantity: hasFx ? (8 + ((String(a.atm_id).charCodeAt(3) || 55) + i) % 32) : (8 + ((String(a.atm_id).charCodeAt(3) || 55) + i) % 42) },
+            ];
+            const tryTotal = cassettes.filter(c => c.currency === 'TRY').reduce((s, c) => s + c.denomination * c.quantity, 0);
+            const usdTotal = cassettes.filter(c => c.currency === 'USD').reduce((s, c) => s + c.denomination * c.quantity, 0);
+            const eurTotal = cassettes.filter(c => c.currency === 'EUR').reduce((s, c) => s + c.denomination * c.quantity, 0);
+            return {
+              ...a,
+              order: i + 1,
+              operation: op,
+              amount: `₺${tryTotal.toLocaleString('tr-TR')}${usdTotal ? ` + $${usdTotal.toLocaleString('tr-TR')}` : ''}${eurTotal ? ` + €${eurTotal.toLocaleString('tr-TR')}` : ''}`,
+              hasFx,
+              cassettes,
+              planned: i % 4 !== 0,
+              sla_hours: getSlaHours(a.zone || '3', i % 4 !== 0),
+              zone: a.zone || '3',
+            };
+          }),
+        });
+      }
+
+      // Later route - Collection (Toplama)
+      let laterOffsiteAtms = workingAtms.slice(28, 40);
+      if (laterOffsiteAtms.length < 12 && workingAtms.length > 0) {
+        laterOffsiteAtms = [];
+        for (let i = 0; i < 12; i++) {
+          laterOffsiteAtms.push(workingAtms[i % workingAtms.length]);
+        }
+      }
+
+      allRoutes.push({
+        id: `R3-${cashCenter}`,
         name: `${cashCenter} NM Rotası`,
         cash_center: cashCenter,
-        day: "today",
+        day: "later",
+        planned_date: "5 Şubat (2 gün sonra)",
         cit_company: "BANTAŞ",
-        team: `CIT Team ${teams[0]}`,
-        vehicle: vehicles[0],
-        operation_type: "replenishment",
-        status: "in-progress",
-        progress: 47,
-        atms_count: todayOffsiteAtms.length,
-        completed: 7,
-        efficiency_score: 82 + Math.floor(Math.random() * 12),
-        estimated_time: `${(todayOffsiteAtms.length * 0.25).toFixed(1)}h`,
-        total_cash: `₺${(todayOffsiteAtms.length * 380000 + Math.random() * 500000).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`,
-        atms: todayOffsiteAtms.map((a: any, i: number) => ({
-          ...a,
-          order: i + 1,
-          operation: "ikmal",
-          amount: `₺${(Math.random() * 400000 + 200000).toFixed(0)}`,
-          planned: i % 3 !== 0, // 33% plansız, 67% planlı
-          sla_hours: getSlaHours(a.zone || "3", i % 3 !== 0),
-          zone: a.zone || "3"
-        })),
-      });
-    }
-    
-    // Tomorrow route - Mixed (Karışık: ikmal + toplama)
-    const tomorrowOffsiteAtms = workingAtms.slice(15, 28);
-    if (tomorrowOffsiteAtms.length > 0) {
-      routes.push({
-        id: `R2-${cashCenter}`,
-        name: `${cashCenter} NM Rotası`,
-        cash_center: cashCenter,
-        day: "tomorrow",
-        cit_company: "BANTAŞ",
-        team: `CIT Team ${teams[1]}`,
-        vehicle: vehicles[1],
-        operation_type: "mixed",
+        team: `CIT Team ${teams[2]}`,
+        vehicle: vehicles[2],
+        operation_type: "collection",
         status: "planned",
         progress: 0,
-        atms_count: tomorrowOffsiteAtms.length,
+        atms_count: laterOffsiteAtms.length,
         completed: 0,
-        efficiency_score: 78 + Math.floor(Math.random() * 10),
-        estimated_time: `${(tomorrowOffsiteAtms.length * 0.28).toFixed(1)}h`,
-        total_cash: `₺${(tomorrowOffsiteAtms.length * 420000 + Math.random() * 600000).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`,
-        atms: tomorrowOffsiteAtms.map((a: any, i: number) => ({
-          ...a,
-          order: i + 1,
-          operation: i % 3 === 0 ? "toplama" : "ikmal",
-          amount: `₺${(Math.random() * 450000 + 250000).toFixed(0)}`,
-          planned: i % 4 !== 0, // 25% plansız, 75% planlı
-          sla_hours: getSlaHours(a.zone || "3", i % 4 !== 0),
-          zone: a.zone || "3"
-        })),
+        efficiency_score: 80 + Math.floor(Math.random() * 9),
+        estimated_time: `${(laterOffsiteAtms.length * 0.27).toFixed(1)}h`,
+        total_cash: `₺${(laterOffsiteAtms.length * 400000 + Math.random() * 550000).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`,
+        atms: laterOffsiteAtms.map((a: any, i: number) => {
+          const hasFx = i % 7 === 0;
+          const cassettes = [
+            { id: 1, currency: 'TRY', denomination: 200, quantity: 50 + ((String(a.atm_id).charCodeAt(0) || 70) + i) % 70 },
+            { id: 2, currency: 'TRY', denomination: 100, quantity: 40 + ((String(a.atm_id).charCodeAt(1) || 65) + i) % 60 },
+            { id: 3, currency: hasFx ? 'USD' : 'TRY', denomination: hasFx ? 100 : 50, quantity: hasFx ? (18 + ((String(a.atm_id).charCodeAt(2) || 60) + i) % 32) : (25 + ((String(a.atm_id).charCodeAt(2) || 60) + i) % 50) },
+            { id: 4, currency: hasFx ? 'EUR' : 'TRY', denomination: hasFx ? 50 : 20, quantity: hasFx ? (12 + ((String(a.atm_id).charCodeAt(3) || 55) + i) % 28) : (12 + ((String(a.atm_id).charCodeAt(3) || 55) + i) % 38) },
+          ];
+          const tryTotal = cassettes.filter(c => c.currency === 'TRY').reduce((s, c) => s + c.denomination * c.quantity, 0);
+          const usdTotal = cassettes.filter(c => c.currency === 'USD').reduce((s, c) => s + c.denomination * c.quantity, 0);
+          const eurTotal = cassettes.filter(c => c.currency === 'EUR').reduce((s, c) => s + c.denomination * c.quantity, 0);
+          return {
+            ...a,
+            order: i + 1,
+            operation: 'toplama',
+            amount: `₺${tryTotal.toLocaleString('tr-TR')}${usdTotal ? ` + $${usdTotal.toLocaleString('tr-TR')}` : ''}${eurTotal ? ` + €${eurTotal.toLocaleString('tr-TR')}` : ''}`,
+            hasFx,
+            cassettes,
+            planned: i % 5 !== 0,
+            sla_hours: getSlaHours(a.zone || '3', i % 5 !== 0),
+            zone: a.zone || '3',
+          };
+        }),
       });
-    }
-    
-    // Later route - Collection (Toplama) - ALWAYS create this route
-    // Ensure we have at least 12 ATMs for collection route
-    let laterOffsiteAtms = workingAtms.slice(28, 40);
-    
-    // If slice is empty or too small, take from beginning and duplicate
-    if (laterOffsiteAtms.length < 12 && workingAtms.length > 0) {
-      laterOffsiteAtms = [];
-      for (let i = 0; i < 12; i++) {
-        laterOffsiteAtms.push(workingAtms[i % workingAtms.length]);
-      }
-    }
-    
-    console.log('🔍 DEBUG Collection Route:', {
-      cashCenter,
-      allOffsiteCount: allOffsiteAtms.length,
-      workingAtmsCount: workingAtms.length,
-      laterOffsiteCount: laterOffsiteAtms.length,
-      laterAtmIds: laterOffsiteAtms.map(a => a.atm_id).slice(0, 5) // First 5 for brevity
     });
-    
-    // Always add collection route with at least 12 ATMs
-    routes.push({
-      id: `R3-${cashCenter}`,
-      name: `${cashCenter} NM Rotası`,
-      cash_center: cashCenter,
-      day: "later",
-      planned_date: "5 Şubat (2 gün sonra)",
-      cit_company: "BANTAŞ",
-      team: `CIT Team ${teams[2]}`,
-      vehicle: vehicles[2],
-      operation_type: "collection",
-      status: "planned",
-      progress: 0,
-      atms_count: laterOffsiteAtms.length,
-      completed: 0,
-      efficiency_score: 80 + Math.floor(Math.random() * 9),
-      estimated_time: `${(laterOffsiteAtms.length * 0.27).toFixed(1)}h`,
-      total_cash: `₺${(laterOffsiteAtms.length * 400000 + Math.random() * 550000).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`,
-      atms: laterOffsiteAtms.map((a: any, i: number) => ({
-        ...a,
-        order: i + 1,
-        operation: "toplama",
-        amount: `₺${(Math.random() * 420000 + 230000).toFixed(0)}`,
-        planned: i % 5 !== 0, // 20% plansız, 80% planlı
-        sla_hours: getSlaHours(a.zone || "3", i % 5 !== 0),
-        zone: a.zone || "3"
-      })),
-    });
-      
-    setCitRoutes(routes);
-  }, [allCashCenterGroups, selectedCashCenter]);
+
+    setCitRoutes(allRoutes);
+  }, [allCashCenterGroups, selectedNmTabs]);
+
+  // ─── Kaset bazlı yükleme verisi üreteci ────────────────────────────────────
+  const generateCassettes = (atmId: string, hasFx: boolean) => {
+    const seed = String(atmId).split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+    const r = (min: number, max: number, off: number) => min + ((seed + off) % (max - min + 1));
+    if (hasFx) {
+      return [
+        { id: 1, currency: 'TRY', denomination: 200, quantity: 30 + r(0, 60, 1) },
+        { id: 2, currency: 'TRY', denomination: 100, quantity: 20 + r(0, 50, 2) },
+        { id: 3, currency: 'USD', denomination: 100, quantity: 15 + r(0, 35, 3) },
+        { id: 4, currency: 'EUR', denomination:  50, quantity: 10 + r(0, 30, 4) },
+      ];
+    }
+    return [
+      { id: 1, currency: 'TRY', denomination: 200, quantity: 40 + r(0, 80, 1) },
+      { id: 2, currency: 'TRY', denomination: 100, quantity: 30 + r(0, 70, 2) },
+      { id: 3, currency: 'TRY', denomination:  50, quantity: 20 + r(0, 60, 3) },
+      { id: 4, currency: 'TRY', denomination:  20, quantity: 10 + r(0, 40, 4) },
+    ];
+  };
+
+  const CURRENCY_SYMBOL: Record<string, string> = { TRY: '₺', USD: '$', EUR: '€' };
+  const USD_RATE = 38;
+  const EUR_RATE = 41;
+  const toTRY = (currency: string, amount: number) =>
+    currency === 'USD' ? amount * USD_RATE : currency === 'EUR' ? amount * EUR_RATE : amount;
 
   return (
     <div className="space-y-4">
@@ -633,7 +823,88 @@ export default function CashFlowOpsPage() {
             </div>
           </div>
           
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 flex-wrap justify-end">
+            {/* Tarih aralığı + Excel */}
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={aiEngineDateStart}
+                onChange={(e) => setAiEngineDateStart(e.target.value)}
+                max={aiEngineDateEnd}
+                className="px-2 py-1.5 text-xs rounded-lg bg-[#112544] text-white border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#2E86FF]"
+              />
+              <span className="text-white/40 text-xs">—</span>
+              <input
+                type="date"
+                value={aiEngineDateEnd}
+                onChange={(e) => setAiEngineDateEnd(e.target.value)}
+                min={aiEngineDateStart}
+                className="px-2 py-1.5 text-xs rounded-lg bg-[#112544] text-white border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#2E86FF]"
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => {
+                  setAiEngineDateStart(new Date().toISOString().slice(0, 10));
+                  setAiEngineDateEnd(new Date(Date.now() + 2 * 86400_000).toISOString().slice(0, 10));
+                }}
+                className="px-2 py-1.5 text-xs rounded-lg bg-[#112544] text-white/70 hover:text-white border border-[#2B416B] hover:border-[#2E86FF] transition"
+              >
+                3 Gün
+              </button>
+              <button
+                onClick={() => {
+                  setAiEngineDateStart(new Date().toISOString().slice(0, 10));
+                  setAiEngineDateEnd(new Date(Date.now() + 7 * 86400_000).toISOString().slice(0, 10));
+                }}
+                className="px-2 py-1.5 text-xs rounded-lg bg-[#112544] text-white/70 hover:text-white border border-[#2B416B] hover:border-[#2E86FF] transition"
+              >
+                7 Gün
+              </button>
+              <button
+                onClick={async () => {
+                  const XLSX = await import('xlsx');
+                  const filtered = allSuggestions.filter(
+                    (r) => r.tarih >= aiEngineDateStart && r.tarih <= aiEngineDateEnd
+                  );
+                  // Öneri satırları
+                  const suggestionRows = filtered.map((r) => ({
+                    'Tarih'       : r.tarih,
+                    'ATM ID'      : r.atmId,
+                    'ATM Adı'     : r.atmName,
+                    'Şehir'       : r.city,
+                    'İlçe'        : r.district,
+                    'İşlem Türü'  : r.type === 'collection' ? 'Para Toplama' : 'İkmal',
+                    'Öncelik'     : r.priority === 'high' ? 'Yüksek' : r.priority === 'medium' ? 'Orta' : 'Düşük',
+                    'Sebep'       : r.reason,
+                    'ETA'         : r.eta,
+                    'Güven %'    : r.confidence,
+                  }));
+                  // Metrik satırları
+                  const metricRows = [
+                    { 'Metrik': 'Tahmin Doğruluğu', 'Değer': '94.7%' },
+                    { 'Metrik': 'Bütçe Tasarrufu (Bu Ay)', 'Değer': '₺1.847.000' },
+                    { 'Metrik': 'CIT Maliyeti Azalması', 'Değer': '₺980.000' },
+                    { 'Metrik': 'Stok-out Risk Azalması', 'Değer': '₺520.000' },
+                    { 'Metrik': 'Günlük Operasyon Hedefi', 'Değer': '573 operasyon' },
+                    { 'Metrik': 'Para Toplama (24h)', 'Değer': '87 ATM' },
+                    { 'Metrik': 'İkmal (48h)', 'Değer': '23 ATM' },
+                  ];
+                  const wb = XLSX.utils.book_new();
+                  const wsMetrics = XLSX.utils.json_to_sheet(metricRows);
+                  const wsSuggestions = XLSX.utils.json_to_sheet(suggestionRows.length ? suggestionRows : [{ 'Bilgi': 'Seçili aralıkta öneri yok' }]);
+                  XLSX.utils.book_append_sheet(wb, wsMetrics, 'AI Motor Metrikleri');
+                  XLSX.utils.book_append_sheet(wb, wsSuggestions, 'Optimizasyon Önerileri');
+                  XLSX.writeFile(wb, `ai_cash_optimization_${aiEngineDateStart}_${aiEngineDateEnd}.xlsx`);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-[#10B981]/20 hover:bg-[#10B981]/30 text-[#10B981] border border-[#10B981]/30 hover:border-[#10B981]/60 font-semibold transition"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Excel İndir
+              </button>
+            </div>
             <button
               onClick={() => setAiEngineEnabled(!aiEngineEnabled)}
               className={`relative inline-flex h-12 w-24 items-center rounded-full transition-all duration-300 ring-2 ${
@@ -689,13 +960,40 @@ export default function CashFlowOpsPage() {
 
               <div className="bg-[#0E2142]/60 rounded-xl p-4 ring-1 ring-[#2B416B]">
                 <div className="text-xs text-[#A7B8D8] mb-2">Son Güncelleme</div>
-                <div className="text-sm font-bold text-white">2 dk önce</div>
+                <div className="text-sm font-bold text-white mb-2">{formatTimeSince(lastRefreshed)}</div>
+                <button
+                  onClick={handleManualRefresh}
+                  disabled={isRefreshing}
+                  className={`w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    isRefreshing
+                      ? "bg-[#1a2d4a] text-[#A7B8D8] cursor-not-allowed"
+                      : "bg-[#2E86FF]/20 hover:bg-[#2E86FF]/40 text-[#2E86FF] border border-[#2E86FF]/30 hover:border-[#2E86FF]/60"
+                  }`}
+                >
+                  {isRefreshing ? (
+                    <>
+                      <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                      </svg>
+                      Güncelleniyor...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      Güncelle
+                    </>
+                  )}
+                </button>
               </div>
             </div>
 
             {/* Manual Rules Override - Only shown in Manual mode */}
             {aiEngineMode === "manual" && (
-              <div className="bg-gradient-to-r from-[#F2B705]/20 to-[#F59E0B]/10 rounded-xl p-5 ring-1 ring-[#F2B705]/50 mb-6">
+              <>
+              <div className="bg-gradient-to-r from-[#F2B705]/20 to-[#F59E0B]/10 rounded-xl p-5 ring-1 ring-[#F2B705]/50 mb-4">
                 <div className="flex items-center gap-2 mb-4">
                   <span className="text-xl">⚙️</span>
                   <div className="text-sm font-semibold text-white">Manuel Kural Tanımla (AI Öğrenecek)</div>
@@ -742,6 +1040,233 @@ export default function CashFlowOpsPage() {
                   </button>
                 </div>
               </div>
+
+              {/* Nakit Toplu Veri Yükleme — Beyin Besleme */}
+              <div className="bg-gradient-to-r from-[#2E86FF]/10 to-[#0066FF]/5 rounded-xl p-5 ring-1 ring-[#2E86FF]/40 mb-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <span className="text-lg">📦</span>
+                  <div>
+                    <div className="text-sm font-semibold text-white">Toplu Nakit Verisi Yükle — Beyin Öğrensin</div>
+                    <div className="text-xs text-[#A7B8D8]">İkmal, para toplama, günlük bakiye geçmişleri — beyin ETA tahminlerini ve nakit kararlarını kişiselleştirir</div>
+                  </div>
+                  <span className="ml-auto px-2 py-0.5 rounded-full bg-[#2E86FF]/20 text-[#2E86FF] text-[10px] font-bold">🔒 DAHİLİ</span>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {/* Sol: Yükleme formu */}
+                  <div className="space-y-3">
+                    {/* Veri türü + Ay/Yıl */}
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="col-span-3">
+                        <label className="text-[10px] text-[#A7B8D8] mb-1 block">Veri Türü</label>
+                        <select
+                          value={cashBulkVeriTuru}
+                          onChange={(e) => setCashBulkVeriTuru(e.target.value)}
+                          className="w-full px-2 py-1.5 bg-[#112544] text-white text-xs rounded-lg border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#2E86FF]"
+                        >
+                          <option value="ikmal">🟢 İkmal Geçmişi</option>
+                          <option value="para_toplama">🟡 Para Toplama Geçmişi</option>
+                          <option value="gunluk_bakiye">🔵 Günlük Bakiye / Nakit Seviyesi</option>
+                          <option value="ariza_log">🔴 Arıza Log Geçmişi</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-[#A7B8D8] mb-1 block">Ay</label>
+                        <select
+                          value={cashBulkAy}
+                          onChange={(e) => setCashBulkAy(e.target.value)}
+                          className="w-full px-2 py-1.5 bg-[#112544] text-white text-xs rounded-lg border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#2E86FF]"
+                        >
+                          {['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'].map((m, i) => (
+                            <option key={i+1} value={String(i+1)}>{m}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-[#A7B8D8] mb-1 block">Yıl</label>
+                        <select
+                          value={cashBulkYil}
+                          onChange={(e) => setCashBulkYil(e.target.value)}
+                          className="w-full px-2 py-1.5 bg-[#112544] text-white text-xs rounded-lg border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#2E86FF]"
+                        >
+                          {[2023,2024,2025,2026].map(y => (
+                            <option key={y} value={String(y)}>{y}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Drag & Drop alanı */}
+                    <div
+                      onDragOver={(e) => { e.preventDefault(); setCashBulkDragging(true); }}
+                      onDragLeave={() => setCashBulkDragging(false)}
+                      onDrop={(e) => { e.preventDefault(); setCashBulkDragging(false); const f = e.dataTransfer.files?.[0]; if (f) setCashBulkFile(f); }}
+                      className={`border-2 border-dashed rounded-xl p-4 text-center transition-all ${
+                        cashBulkDragging ? 'border-[#2E86FF] bg-[#2E86FF]/10' : cashBulkFile ? 'border-[#10B981] bg-[#10B981]/5' : 'border-[#2B416B] hover:border-[#2E86FF]'
+                      }`}
+                    >
+                      <input
+                        id="cash-bulk-input"
+                        type="file"
+                        accept=".xlsx,.xls,.csv"
+                        className="hidden"
+                        onChange={(e) => { const f = e.target.files?.[0]; if (f) setCashBulkFile(f); }}
+                      />
+                      <label htmlFor="cash-bulk-input" className="cursor-pointer block">
+                        {cashBulkFile ? (
+                          <>
+                            <div className="text-2xl mb-1">📄</div>
+                            <div className="text-xs font-semibold text-[#10B981] truncate">{cashBulkFile.name}</div>
+                            <div className="text-[10px] text-[#A7B8D8] mt-0.5">{(cashBulkFile.size / 1024).toFixed(0)} KB — değiştirmek için tıkla</div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="text-2xl mb-1">📤</div>
+                            <div className="text-xs font-semibold text-white">Excel / CSV sürükle veya tıkla</div>
+                            <div className="text-[10px] text-[#A7B8D8] mt-0.5">.xlsx • .xls • .csv</div>
+                          </>
+                        )}
+                      </label>
+                    </div>
+
+                    {/* Yükle butonu */}
+                    <button
+                      disabled={!cashBulkFile || cashBulkStatus === 'uploading'}
+                      onClick={async () => {
+                        if (!cashBulkFile) return;
+                        setCashBulkStatus('uploading');
+                        setCashBulkResult(null);
+                        try {
+                          const fd = new FormData();
+                          fd.append('file', cashBulkFile);
+                          fd.append('veri_turu', cashBulkVeriTuru);
+                          fd.append('ay', cashBulkAy);
+                          fd.append('yil', cashBulkYil);
+                          const res = await fetch('/api/train-upload', { method: 'POST', body: fd });
+                          if (!res.ok) throw new Error('Sunucu hatası');
+                          const json = await res.json();
+                          setCashBulkResult(json);
+                          setCashBulkStatus('success');
+                          setCashBulkHistory(prev => [{
+                            dosya     : cashBulkFile.name,
+                            veri_turu : cashBulkVeriTuru,
+                            tarih     : new Date().toLocaleString('tr-TR'),
+                            satir     : json.satir_sayisi,
+                            eslesme   : json.eslesme_orani,
+                            beyin_atm : json.beyin?.ogrenilen_atm ?? 0,
+                          }, ...prev.slice(0, 9)]);
+                          setCashBulkFile(null);
+                          (document.getElementById('cash-bulk-input') as HTMLInputElement).value = '';
+                        } catch {
+                          setCashBulkStatus('error');
+                        }
+                      }}
+                      className={`w-full py-2.5 rounded-xl text-sm font-bold transition-all ${
+                        !cashBulkFile
+                          ? 'bg-[#112544] text-[#A7B8D8] cursor-not-allowed'
+                          : cashBulkStatus === 'uploading'
+                          ? 'bg-[#2E86FF]/60 text-white cursor-wait'
+                          : 'bg-gradient-to-r from-[#2E86FF] to-[#0066FF] hover:from-[#0066FF] hover:to-[#2E86FF] text-white shadow-lg hover:shadow-xl'
+                      }`}
+                    >
+                      {cashBulkStatus === 'uploading' ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                          </svg>
+                          Yükleniyor ve işleniyor...
+                        </span>
+                      ) : '🧠 Beyne Gönder ve Eğit'}
+                    </button>
+
+                    {/* Sonuç */}
+                    {cashBulkStatus === 'success' && cashBulkResult && (
+                      <div className="bg-[#10B981]/10 rounded-xl p-3 ring-1 ring-[#10B981]/30 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm">✅</span>
+                          <span className="text-xs font-semibold text-[#10B981]">{cashBulkResult.satir_sayisi} satır yüklendi</span>
+                          <span className="ml-auto text-xs font-bold text-[#F2B705]">Kolon eşleşme: %{Math.round(cashBulkResult.eslesme_orani * 100)}</span>
+                        </div>
+                        <div className="text-[10px] text-[#A7B8D8]">Tanınan kolonlar: {cashBulkResult.eslesen_kolonlar.join(', ') || '—'}</div>
+                        {cashBulkResult.beyin?.basarili && cashBulkResult.beyin.ogrenme_ozeti ? (
+                          <div className="border-t border-[#10B981]/20 pt-2">
+                            <div className="flex items-center gap-1.5 mb-1.5">
+                              <span className="text-sm">🧠</span>
+                              <span className="text-xs font-bold text-white">Beyin Öğrendi</span>
+                              <span className="ml-auto text-[10px] text-[#10B981] font-bold">{cashBulkResult.beyin.ogrenme_ozeti.toplam_ogrenen_atm} ATM etkilendi</span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-1">
+                              {cashBulkResult.beyin.ogrenme_ozeti.eta_guncellenen_atm > 0 && (
+                                <div className="bg-[#0E2142]/60 rounded-lg px-2 py-1 text-[10px] text-[#2E86FF]">⏱️ ETA iyileşti: <strong>{cashBulkResult.beyin.ogrenme_ozeti.eta_guncellenen_atm} ATM</strong></div>
+                              )}
+                              {cashBulkResult.beyin.ogrenme_ozeti.risk_skoru_guncellenen_atm > 0 && (
+                                <div className="bg-[#0E2142]/60 rounded-lg px-2 py-1 text-[10px] text-[#EF4444]">📊 Risk güncellendi: <strong>{cashBulkResult.beyin.ogrenme_ozeti.risk_skoru_guncellenen_atm} ATM</strong></div>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-[#10B981] mt-1.5">Nakit karar döngüsü güncellendi — bir sonraki ikmal/toplama bu verileri kullanacak.</div>
+                          </div>
+                        ) : cashBulkResult.beyin?.uyari ? (
+                          <div className="border-t border-[#F2B705]/20 pt-2 text-[10px] text-[#F2B705]">⚠️ {cashBulkResult.beyin.uyari}</div>
+                        ) : null}
+                      </div>
+                    )}
+                    {cashBulkStatus === 'error' && (
+                      <div className="bg-[#EF4444]/10 rounded-xl p-3 ring-1 ring-[#EF4444]/30 text-xs text-[#EF4444]">⚠️ Yükleme başarısız. Dosya formatını veya sunucu bağlantısını kontrol edin.</div>
+                    )}
+                  </div>
+
+                  {/* Sağ: Geçmiş + Beklenen Kolonlar */}
+                  <div className="flex flex-col gap-3">
+                    <div className="text-[10px] text-[#A7B8D8] font-semibold">🗓️ Yükleme Geçmişi</div>
+                    {cashBulkHistory.length === 0 ? (
+                      <div className="flex items-center justify-center min-h-[100px] text-xs text-[#A7B8D8] bg-[#112544]/40 rounded-xl border border-dashed border-[#2B416B]">
+                        Henüz yükleme yok
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-[180px] overflow-y-auto pr-1">
+                        {cashBulkHistory.map((h, i) => (
+                          <div key={i} className="bg-[#112544]/60 rounded-lg p-2 ring-1 ring-[#2B416B]">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-semibold text-white truncate">{h.dosya}</div>
+                                <div className="text-[10px] text-[#A7B8D8] mt-0.5">
+                                  {h.veri_turu === 'ikmal' ? '🟢 İkmal' : h.veri_turu === 'para_toplama' ? '🟡 Para Toplama' : h.veri_turu === 'gunluk_bakiye' ? '🔵 Bakiye' : '🔴 Arıza'} — {h.tarih}
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <div className="text-xs font-bold text-[#10B981]">{h.satir} satır</div>
+                                <div className="text-[10px] text-[#F2B705]">%{Math.round(h.eslesme * 100)} eşleşme</div>
+                                {h.beyin_atm > 0 && <div className="text-[10px] text-[#A7B8D8]">🧠 {h.beyin_atm} ATM</div>}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Beklenen Kolonlar */}
+                    <div className="bg-[#0E2142]/60 rounded-xl p-3 ring-1 ring-[#2B416B]">
+                      <div className="text-[10px] font-semibold text-[#A7B8D8] mb-2">Beklenen Kolonlar</div>
+                      <div className="space-y-1">
+                        {({
+                          ikmal        : ['terminal_id', 'tarih', 'miktar_tl', 'kaset_1', 'kaset_2'],
+                          para_toplama : ['terminal_id', 'tarih', 'toplanan_tl', 'kaset_1', 'kaset_2'],
+                          gunluk_bakiye: ['terminal_id', 'tarih', 'bakiye_tl', 'nakit_seviyesi'],
+                          ariza_log    : ['terminal_id', 'ariza_tarihi', 'ariza_kodu', 'cozum_suresi', 'flm_slm'],
+                        } as Record<string, string[]>)[cashBulkVeriTuru]?.map(col => (
+                          <div key={col} className="flex items-center gap-1.5">
+                            <div className="w-1.5 h-1.5 rounded-full bg-[#2E86FF] shrink-0" />
+                            <span className="text-[10px] text-white font-mono">{col}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="text-[10px] text-[#A7B8D8] mt-2">Alternatif kolon adları da otomatik tanınır (ATM ID, Kaset 1, vs.)</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              </>
             )}
 
             {/* Key Metrics */}
@@ -840,22 +1365,83 @@ export default function CashFlowOpsPage() {
                 </div>
               </div>
               
-              <div className={`overflow-hidden transition-all duration-500 ease-in-out ${autoSuggestionsExpanded ? 'max-h-[800px] opacity-100 mt-4' : 'max-h-0 opacity-0'}`}>
-              <div className="space-y-3 max-h-64 overflow-y-auto">
-                {[
-                  { id: 1, type: "collection", atmId: "FA026", atmName: "BATI ATASEHIR SUBE 2", city: "İstanbul", district: "Ataşehir", priority: "high", reason: "Kaset %89 dolu (Cuma öğleden sonra maaş yoğunluğu tahmini)", eta: "18:00", confidence: 96 },
-                  { id: 2, type: "collection", atmId: "FA032", atmName: "41 DARICA EMEK", city: "Kocaeli", district: "Darıca", priority: "high", reason: "Hafta sonu + Finbor lokasyonu, %91 doluluk", eta: "16:30", confidence: 94 },
-                  { id: 3, type: "collection", atmId: "FA025", atmName: "01 SARICAM H.SABANCI OSB", city: "Adana", district: "Sarıçam", priority: "medium", reason: "Organize sanayi bölgesi - Cuma akşam yoğunluk paterni", eta: "19:00", confidence: 92 },
-                  { id: 4, type: "collection", atmId: "FA034", atmName: "16 BURSA FOMARA", city: "Bursa", district: "Nilüfer", priority: "high", reason: "AVM lokasyonu - Cumartesi alışveriş yoğunluğu, %87 doluluk", eta: "17:00", confidence: 93 },
-                  { id: 5, type: "replenishment", atmId: "FA018", atmName: "07 ALANYA OTOGAR", city: "Antalya", district: "Alanya", priority: "medium", reason: "Pazartesi sabahı tükenmeden önleyici ikmal", eta: "Pzr 22:00", confidence: 88 },
-                  { id: 6, type: "collection", atmId: "FA023", atmName: "35 KONAK KEMERALT", city: "İzmir", district: "Konak", priority: "high", reason: "Tarihi çarşı bölgesi - Hafta sonu turist yoğunluğu, %90 doluluk", eta: "15:30", confidence: 95 },
-                  { id: 7, type: "replenishment", atmId: "FA006", atmName: "06 ANKARA KIZILAY", city: "Ankara", district: "Çankaya", priority: "high", reason: "Metro istasyonu - Pazartesi sabah trafiği öncesi kritik seviye", eta: "Pzr 23:00", confidence: 91 },
-                  { id: 8, type: "collection", atmId: "FA024", atmName: "41 GEBZE ORGANIZE", city: "Kocaeli", district: "Gebze", priority: "medium", reason: "Sanayi bölgesi - Haftalık maaş ödemesi sonrası, %84 doluluk", eta: "19:30", confidence: 89 },
-                  { id: 9, type: "replenishment", atmId: "FA019", atmName: "01 ANTALYA HAVALIMANI", city: "Antalya", district: "Serik", priority: "medium", reason: "Havalimanı - Pazar akşam uçuş yoğunluğu öncesi", eta: "Paz 20:00", confidence: 87 },
-                  { id: 10, type: "collection", atmId: "FA033", atmName: "27 S.BEY KARATAS PO 2", city: "Gaziantep", district: "Şahinbey", priority: "medium", reason: "Petrol ofisi - Hafta sonu seyahat trafiği, %86 doluluk", eta: "18:30", confidence: 90 },
-                  { id: 11, type: "replenishment", atmId: "FA015", atmName: "16 KADIKOY ISKELE", city: "İstanbul", district: "Kadıköy", priority: "low", reason: "Vapur iskelesi - Pazartesi sabah yolcu yoğunluğu", eta: "Pzr 21:30", confidence: 85 },
-                  { id: 12, type: "collection", atmId: "FA028", atmName: "07 IZMIR ALSANCAK", city: "İzmir", district: "Konak", priority: "medium", reason: "Tren garı yakını - Hafta sonu seyahat yoğunluğu, %88 doluluk", eta: "17:30", confidence: 91 },
-                ].map((rec) => (
+              <div className={`overflow-hidden transition-all duration-500 ease-in-out ${autoSuggestionsExpanded ? 'max-h-[1000px] opacity-100 mt-4' : 'max-h-0 opacity-0'}`}>
+
+              {/* Tarih aralığı + Excel export */}
+              <div className="flex flex-wrap items-center gap-2 mb-4">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={suggestionsDateStart}
+                    onChange={(e) => setSuggestionsDateStart(e.target.value)}
+                    max={suggestionsDateEnd}
+                    className="px-2 py-1.5 text-xs rounded-lg bg-[#112544] text-white border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#2E86FF]"
+                  />
+                  <span className="text-white/40 text-xs">—</span>
+                  <input
+                    type="date"
+                    value={suggestionsDateEnd}
+                    onChange={(e) => setSuggestionsDateEnd(e.target.value)}
+                    min={suggestionsDateStart}
+                    className="px-2 py-1.5 text-xs rounded-lg bg-[#112544] text-white border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#2E86FF]"
+                  />
+                </div>
+                <button
+                  onClick={() => {
+                    const start = new Date().toISOString().slice(0, 10);
+                    const end   = new Date(Date.now() + 2 * 86400_000).toISOString().slice(0, 10);
+                    setSuggestionsDateStart(start);
+                    setSuggestionsDateEnd(end);
+                  }}
+                  className="px-2 py-1.5 text-xs rounded-lg bg-[#112544] text-white/70 hover:text-white border border-[#2B416B] hover:border-[#2E86FF] transition"
+                >
+                  Bugün + 2 Gün
+                </button>
+                <button
+                  onClick={() => {
+                    const start = new Date().toISOString().slice(0, 10);
+                    const end   = new Date(Date.now() + 7 * 86400_000).toISOString().slice(0, 10);
+                    setSuggestionsDateStart(start);
+                    setSuggestionsDateEnd(end);
+                  }}
+                  className="px-2 py-1.5 text-xs rounded-lg bg-[#112544] text-white/70 hover:text-white border border-[#2B416B] hover:border-[#2E86FF] transition"
+                >
+                  7 Gün
+                </button>
+                <button
+                  onClick={async () => {
+                    const XLSX = await import('xlsx');
+                    const filtered = allSuggestions.filter((r) => r.tarih >= suggestionsDateStart && r.tarih <= suggestionsDateEnd);
+                    const rows = filtered.map((r) => ({
+                      'Tarih'        : r.tarih,
+                      'ATM ID'       : r.atmId,
+                      'ATM Adı'      : r.atmName,
+                      'Şehir'        : r.city,
+                      'İlçe'         : r.district,
+                      'İşlem Türü'   : r.type === 'collection' ? 'Para Toplama' : 'İkmal',
+                      'Öncelik'      : r.priority === 'high' ? 'Yüksek' : r.priority === 'medium' ? 'Orta' : 'Düşük',
+                      'Sebep'        : r.reason,
+                      'ETA'          : r.eta,
+                      'Güven %'      : r.confidence,
+                    }));
+                    const ws = XLSX.utils.json_to_sheet(rows);
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, 'Öneriler');
+                    XLSX.writeFile(wb, `atm_oneriler_${suggestionsDateStart}_${suggestionsDateEnd}.xlsx`);
+                  }}
+                  className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-[#10B981]/20 hover:bg-[#10B981]/30 text-[#10B981] border border-[#10B981]/30 hover:border-[#10B981]/60 font-semibold transition"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  Excel İndir
+                </button>
+              </div>
+
+              <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+                {allSuggestions
+                  .filter((r) => r.tarih >= suggestionsDateStart && r.tarih <= suggestionsDateEnd)
+                  .map((rec) => (
                   <div key={rec.id} className="bg-[#112544]/60 rounded-lg p-4 ring-1 ring-[#2B416B] hover:ring-[#2E86FF] transition">
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex items-center gap-3">
@@ -1007,7 +1593,9 @@ export default function CashFlowOpsPage() {
         <div className="bg-[#112544] rounded-2xl p-4 ring-1 ring-[#2B416B]">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <div className="text-sm">Low Cash ATM Heat Map</div>
+              <div className="text-sm">
+                {heatMapView === "low_cash" ? "🔴 Düşük Nakit ATM Isı Haritası (İkmal Gerekli)" : "🟢 Yüksek Nakit ATM Isı Haritası (Para Toplama)"}
+              </div>
               <button
                 onClick={() => setInfoModal(CASHFLOW_METRIC_EXPLANATIONS["heat_map"])}
                 className="w-5 h-5 rounded-full bg-[#2E86FF]/20 hover:bg-[#2E86FF]/40 text-[#2E86FF] text-xs flex items-center justify-center transition"
@@ -1017,6 +1605,30 @@ export default function CashFlowOpsPage() {
             </div>
             
             <div className="flex items-center gap-2">
+              {/* View Toggle */}
+              <div className="flex items-center gap-1 bg-[#0E2142] rounded-lg p-1">
+                <button
+                  onClick={() => setHeatMapView("low_cash")}
+                  className={`px-3 py-1 rounded text-xs font-semibold transition ${
+                    heatMapView === "low_cash"
+                      ? "bg-[#EF4444] text-white"
+                      : "bg-transparent text-[#A7B8D8] hover:text-white"
+                  }`}
+                >
+                  🔴 İkmal
+                </button>
+                <button
+                  onClick={() => setHeatMapView("high_cash")}
+                  className={`px-3 py-1 rounded text-xs font-semibold transition ${
+                    heatMapView === "high_cash"
+                      ? "bg-[#10B981] text-white"
+                      : "bg-transparent text-[#A7B8D8] hover:text-white"
+                  }`}
+                >
+                  🟢 Para Toplama
+                </button>
+              </div>
+
               <div className="flex items-center gap-2 bg-[#0E2142] rounded-lg px-2 py-1">
                 <span className="text-[10px] text-[#A7B8D8]">Başlangıç:</span>
                 <input
@@ -1037,26 +1649,34 @@ export default function CashFlowOpsPage() {
               </div>
               <button
                 onClick={() => {
-                  const csvContent = '\uFEFFDüşük Nakit ATM Haritası Raporu\n' +
+                  const atmData = heatMapView === "low_cash" ? lowCashAtms : highCashAtms;
+                  const viewLabel = heatMapView === "low_cash" ? "Düşük Nakit" : "Yüksek Nakit";
+                  const riskLabels = heatMapView === "low_cash" 
+                    ? { critical: "Kritik (< 20%)", low: "Düşük (20-30%)", normal: "Normal (> 30%)" }
+                    : { critical: "Kritik (> 95%)", high: "Yüksek (90-95%)", normal: "Normal (< 90%)" };
+                  
+                  const csvContent = '\uFEFF' + viewLabel + ' ATM Haritası Raporu\n' +
                     'Rapor Tarihi: ' + new Date().toLocaleDateString('tr-TR') + '\n' +
                     'Tarih Aralığı: ' + heatMapStartDate + ' - ' + heatMapEndDate + '\n\n' +
                     'ATM ID,ATM Adı,Şehir,İlçe,Nakit Seviyesi (%),Risk Durumu,Latitude,Longitude\n' +
-                    lowCashAtms.map(atm => {
-                      const riskLevel = atm.cash_level < 20 ? 'Kritik' : atm.cash_level < 30 ? 'Düşük' : 'Normal';
+                    atmData.map(atm => {
+                      const riskLevel = heatMapView === "low_cash"
+                        ? (atm.cash_level < 20 ? 'Kritik' : atm.cash_level < 30 ? 'Düşük' : 'Normal')
+                        : (atm.cash_level > 95 ? 'Kritik' : atm.cash_level > 90 ? 'Yüksek' : 'Normal');
                       return `${atm.atm_id},${atm.atm_name},${atm.city},${atm.district},${atm.cash_level}%,${riskLevel},${atm.latitude},${atm.longitude}`;
                     }).join('\n') +
                     '\n\nRisk Seviyesi Tanımları:\n' +
-                    'Kritik,< 20%,Acil ikmal gerekli - CIT planlanmalı\n' +
-                    'Düşük,20-30%,Yakın takip - İkmal planına alınmalı\n' +
-                    'Normal,> 30%,Stabil durum - Normal izleme\n\n' +
-                    'Özet İstatistikler:\n' +
-                    'Toplam Düşük Nakit ATM,' + lowCashAtms.length + '\n' +
-                    'Kritik Risk,' + lowCashAtms.filter(a => a.cash_level < 20).length + '\n' +
-                    'Düşük Risk,' + lowCashAtms.filter(a => a.cash_level >= 20 && a.cash_level < 30).length + '\n' +
-                    'Normal,' + lowCashAtms.filter(a => a.cash_level >= 30).length + '\n\n' +
-                    'Şehir Bazlı Dağılım:\n' +
-                    [...new Set(lowCashAtms.map(a => a.city))].map(city => {
-                      const cityAtms = lowCashAtms.filter(a => a.city === city);
+                    (heatMapView === "low_cash"
+                      ? 'Kritik,< 20%,Acil ikmal gerekli - CIT planlanmalı\nDüşük,20-30%,Yakın takip - İkmal planına alınmalı\nNormal,> 30%,Stabil durum - Normal izleme'
+                      : 'Kritik,> 95%,Acil para toplama gerekli\nYüksek,90-95%,Para toplama planlanmalı\nNormal,< 90%,Stabil durum') +
+                    '\n\nÖzet İstatistikler:\n' +
+                    'Toplam ' + viewLabel + ' ATM,' + atmData.length + '\n' +
+                    (heatMapView === "low_cash"
+                      ? 'Kritik Risk,' + atmData.filter(a => a.cash_level < 20).length + '\nDüşük Risk,' + atmData.filter(a => a.cash_level >= 20 && a.cash_level < 30).length + '\nNormal,' + atmData.filter(a => a.cash_level >= 30).length
+                      : 'Kritik (> 95%),' + atmData.filter(a => a.cash_level > 95).length + '\nYüksek (90-95%),' + atmData.filter(a => a.cash_level >= 90 && a.cash_level <= 95).length + '\nNormal (< 90%),' + atmData.filter(a => a.cash_level < 90).length) +
+                    '\n\nŞehir Bazlı Dağılım:\n' +
+                    [...new Set(atmData.map(a => a.city))].map(city => {
+                      const cityAtms = atmData.filter(a => a.city === city);
                       return city + ',' + cityAtms.length + ' ATM';
                     }).join('\n') +
                     '\n\nRapor Oluşturan: AI Cash Optimization Engine\n' +
@@ -1065,7 +1685,7 @@ export default function CashFlowOpsPage() {
                   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
                   const link = document.createElement('a');
                   link.href = URL.createObjectURL(blob);
-                  link.download = `low_cash_heat_map_${new Date().toISOString().split('T')[0]}.csv`;
+                  link.download = `${heatMapView}_heat_map_${new Date().toISOString().split('T')[0]}.csv`;
                   link.click();
                 }}
                 className="px-2 py-1 bg-[#2E86FF] hover:bg-[#1F6FE0] text-white text-[10px] font-semibold rounded-lg transition flex items-center gap-1"
@@ -1080,8 +1700,45 @@ export default function CashFlowOpsPage() {
               </button>
             </div>
           </div>
+          
+          {/* ATM Sayısı Göstergesi */}
+          <div className="mb-2 flex items-center gap-4 text-xs">
+            <div className="flex items-center gap-2 bg-[#0E2142] rounded-lg px-3 py-1.5">
+              <span className="text-[#A7B8D8]">Toplam ATM:</span>
+              <span className="text-white font-bold">
+                {heatMapView === "low_cash" ? lowCashAtms.length : highCashAtms.length}
+              </span>
+            </div>
+            {heatMapView === "low_cash" ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 bg-[#EF4444] rounded-full"></div>
+                  <span className="text-[#EF4444]">Kritik (&lt; 20%): {lowCashAtms.filter(a => a.cash_level < 20).length}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 bg-[#F59E0B] rounded-full"></div>
+                  <span className="text-[#F59E0B]">Düşük (20-30%): {lowCashAtms.filter(a => a.cash_level >= 20 && a.cash_level < 30).length}</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 bg-[#EF4444] rounded-full"></div>
+                  <span className="text-[#EF4444]">Kritik (&gt; 95%): {highCashAtms.filter(a => a.cash_level > 95).length}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 bg-[#F59E0B] rounded-full"></div>
+                  <span className="text-[#F59E0B]">Yüksek (90-95%): {highCashAtms.filter(a => a.cash_level >= 90 && a.cash_level <= 95).length}</span>
+                </div>
+              </>
+            )}
+          </div>
+          
           <div className="h-[360px] w-full rounded-xl overflow-hidden ring-1 ring-[#2B416B]">
-            <HeatMapComponent lowCashAtms={lowCashAtms} />
+            <HeatMapComponent 
+              lowCashAtms={heatMapView === "low_cash" ? lowCashAtms : highCashAtms}
+              isHighCash={heatMapView === "high_cash"}
+            />
           </div>
         </div>
       )}
@@ -1110,15 +1767,82 @@ export default function CashFlowOpsPage() {
 
       {/* CIT Route Optimization */}
       <div className="bg-[#112544] rounded-2xl p-4 ring-1 ring-[#2B416B]">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="text-sm">🚚 CIT Route Optimization</div>
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+          <div className="text-sm font-semibold">🚚 CIT Route Optimization</div>
+
+          {/* NM Tab Bar */}
+          <div className="flex items-center gap-1 flex-wrap">
+            {/* Tüm NM'ler tab */}
+            <button
+              onClick={() => setSelectedCashCenter("")}
+              className={`px-3 py-1.5 text-xs rounded-lg font-semibold transition ring-1 flex items-center gap-1 ${
+                selectedCashCenter === ""
+                  ? "bg-[#2E86FF] text-white ring-[#2E86FF]"
+                  : "bg-[#0E2142] text-[#A7B8D8] ring-[#2B416B] hover:ring-[#2E86FF] hover:text-white"
+              }`}
+            >
+              🏦 Tüm NM&apos;ler
+              {selectedNmTabs.length > 0 && (
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                  selectedCashCenter === "" ? "bg-white/20 text-white" : "bg-[#2E86FF]/20 text-[#2E86FF]"
+                }`}>
+                  {selectedNmTabs.length}
+                </span>
+              )}
+            </button>
+
+            {/* Individual NM tabs */}
+            {selectedNmTabs.map((nm) => {
+              const isActive = selectedCashCenter === nm;
+              const nmRoutes = citRoutes.filter(r => r.cash_center === nm);
+              const completedCount = nmRoutes.filter(r => r.status === "completed" || r.progress === 100).length;
+              const rate = nmRoutes.length > 0 ? Math.round(completedCount / nmRoutes.length * 100) : 0;
+              return (
+                <div key={nm} className="relative group/tab flex items-center">
+                  <button
+                    onClick={() => setSelectedCashCenter(nm)}
+                    className={`pl-3 pr-8 py-1.5 text-xs rounded-lg font-semibold transition ring-1 flex items-center gap-1.5 max-w-[160px] ${
+                      isActive
+                        ? "bg-[#2E86FF] text-white ring-[#2E86FF]"
+                        : "bg-[#0E2142] text-[#A7B8D8] ring-[#2B416B] hover:ring-[#2E86FF] hover:text-white"
+                    }`}
+                  >
+                    <span className="truncate">{nm}</span>
+                    {nmRoutes.length > 0 && (
+                      <span className={`shrink-0 px-1 py-0.5 rounded text-[10px] font-bold ${
+                        isActive
+                          ? "bg-white/20 text-white"
+                          : rate >= 80
+                          ? "bg-[#10B981]/20 text-[#10B981]"
+                          : "bg-[#F2B705]/20 text-[#F2B705]"
+                      }`}>
+                        {rate}%
+                      </span>
+                    )}
+                  </button>
+                  {/* Close button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedNmTabs(prev => prev.filter(t => t !== nm));
+                      if (selectedCashCenter === nm) setSelectedCashCenter("");
+                    }}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full flex items-center justify-center text-[10px] opacity-0 group-hover/tab:opacity-100 transition bg-black/30 hover:bg-[#E63946] text-white"
+                    title="Kaldır"
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
+
+            {/* Add NM button */}
             <button
               onClick={() => setShowCashCenterSearch(true)}
-              className="px-3 py-1 text-xs rounded-lg font-semibold bg-[#2E86FF]/20 text-[#2E86FF] hover:bg-[#2E86FF]/30 transition ring-1 ring-[#2E86FF]/50 flex items-center gap-2"
+              className="px-2.5 py-1.5 text-xs rounded-lg font-semibold bg-[#0E2142] text-[#2E86FF] ring-1 ring-[#2E86FF]/50 hover:bg-[#2E86FF]/20 transition flex items-center gap-1"
+              title="NM Ekle / Çıkar"
             >
-              🏦 {selectedCashCenter || "NM Seç"}
-              <span className="opacity-60">▼</span>
+              <span className="text-sm leading-none">+</span> NM Ekle
             </button>
           </div>
         </div>
@@ -1525,12 +2249,12 @@ export default function CashFlowOpsPage() {
               </button>
               <button 
                 onClick={() => {
-                  setRouteDateStart("2026-02-05");
-                  setRouteDateEnd("2026-02-05");
+                  setRouteDateStart("2026-02-04");
+                  setRouteDateEnd("2026-02-06");
                 }}
                 className="px-3 py-1 text-xs rounded-lg font-semibold bg-[#0E2142] text-[#A7B8D8] hover:bg-[#2E86FF] hover:text-white transition"
               >
-                Yarın
+                3 Gün
               </button>
               <button 
                 onClick={() => {
@@ -1598,125 +2322,164 @@ export default function CashFlowOpsPage() {
           </div>
         </div>
 
-        <div className="space-y-4">
+        <div className="space-y-2">
           {filteredRoutes.filter(r => {
-            // Map day to actual dates for filtering
-            const routeDate = r.day === "today" ? "2026-02-04" : 
+            const routeDate = r.day === "today" ? "2026-02-04" :
                              r.day === "tomorrow" ? "2026-02-05" : "2026-02-06";
             return routeDate >= routeDateStart && routeDate <= routeDateEnd;
-          }).map((route) => (
-            <div 
-              key={route.id} 
-              onClick={() => setSelectedRoute(route)}
-              className={`bg-[#0E2142]/60 rounded-xl p-6 ring-1 transition cursor-pointer ${
-                selectedRoute?.id === route.id 
-                  ? "ring-2 ring-[#2E86FF] bg-[#2E86FF]/10" 
-                  : "ring-[#2B416B] hover:ring-[#2E86FF]"
-              }`}
-            >
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 flex-wrap mb-2">
-                    <div className="font-semibold text-base">🏦 {route.cash_center} Nakit Merkezi</div>
-                    <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+          }).map((route) => {
+            const isOpen = expandedRoutes.has(route.id);
+            const toggleOpen = (e: React.MouseEvent) => {
+              e.stopPropagation();
+              setExpandedRoutes(prev => {
+                const next = new Set(prev);
+                isOpen ? next.delete(route.id) : next.add(route.id);
+                return next;
+              });
+              setSelectedRoute(route);
+            };
+            const dateLabel = route.day === "today" ? "Bugün" : route.day === "tomorrow" ? "Yarın" : route.planned_date || "Sonraki";
+            return (
+              <div
+                key={route.id}
+                className={`bg-[#0E2142]/60 rounded-xl ring-1 transition overflow-hidden ${
+                  selectedRoute?.id === route.id
+                    ? "ring-2 ring-[#2E86FF]"
+                    : "ring-[#2B416B] hover:ring-[#2E86FF]/60"
+                }`}
+              >
+                {/* ── Always-visible header row ── */}
+                <div
+                  onClick={toggleOpen}
+                  className="flex items-center justify-between px-4 py-3 cursor-pointer select-none"
+                >
+                  <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
+                    {/* Chevron */}
+                    <span className={`text-[#A7B8D8] transition-transform duration-200 text-sm ${isOpen ? "rotate-90" : ""}`}>▶</span>
+                    <span className="font-semibold text-sm truncate">🏦 {route.cash_center}</span>
+                    <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold ${
                       route.operation_type === "replenishment" ? "bg-[#10B981]/20 text-[#10B981]" :
                       route.operation_type === "collection" ? "bg-[#F2B705]/20 text-[#F2B705]" :
                       "bg-[#2E86FF]/20 text-[#2E86FF]"
                     }`}>
-                      {route.operation_type === "replenishment" ? "İkmal" : 
+                      {route.operation_type === "replenishment" ? "İkmal" :
                        route.operation_type === "collection" ? "Para Toplama" : "Karma"}
                     </span>
-                    <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                    <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold ${
                       route.status === "in-progress" ? "bg-[#E63946]/20 text-[#E63946]" :
-                      route.status === "scheduled" ? "bg-[#2E86FF]/20 text-[#2E86FF]" :
                       "bg-[#A7B8D8]/20 text-[#A7B8D8]"
                     }`}>
-                      {route.status === "in-progress" ? "Devam Ediyor" : 
-                       route.status === "scheduled" ? "Başlıyor" : "Planlı"}
+                      {route.status === "in-progress" ? "🔴 Devam" : "📅 Planlı"}
                     </span>
+                    <span className="shrink-0 text-xs text-white/40">{dateLabel}</span>
                   </div>
-                  <div className="text-sm text-[#A7B8D8]">
-                    🏢 {route.cit_company} • {route.team} • {route.vehicle}
-                    {route.planned_date && <span className="ml-2 text-[#10B981]">📅 {route.planned_date}</span>}
-                  </div>
-                  <div className="text-sm text-white/60 mt-1">
-                    📍 Bu rotadaki tüm ATM'ler {route.cash_center} NM'ye bağlıdır • Rota sırası CIT firmasınca belirlenir
+                  {/* Compact stats */}
+                  <div className="flex items-center gap-4 shrink-0 ml-2">
+                    <div className="hidden sm:flex items-center gap-3 text-xs text-[#A7B8D8]">
+                      <span>🚗 {route.atms_count} ATM</span>
+                      <span>⏱ {route.estimated_time}</span>
+                      <span className="text-[#10B981] font-bold">{route.efficiency_score}%</span>
+                    </div>
+                    {/* In-progress mini bar */}
+                    {route.status === "in-progress" && (
+                      <div className="hidden md:flex items-center gap-1">
+                        <div className="w-16 h-1.5 bg-[#112544] rounded-full overflow-hidden">
+                          <div
+                            className="h-1.5 bg-gradient-to-r from-[#2E86FF] to-[#10B981] rounded-full"
+                            style={{ width: `${route.progress}%` }}
+                          />
+                        </div>
+                        <span className="text-xs text-[#A7B8D8]">{route.progress}%</span>
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-2xl font-bold text-[#10B981]">{route.efficiency_score}%</div>
-                  <div className="text-sm text-[#A7B8D8]">Verimlilik</div>
-                </div>
+
+                {/* ── Collapsible detail body ── */}
+                {isOpen && (
+                  <div className="px-4 pb-4 border-t border-[#2B416B]/50">
+                    <div className="pt-3">
+                      {/* Sub-info */}
+                      <div className="text-sm text-[#A7B8D8] mb-3">
+                        🏢 {route.cit_company} • {route.team} • {route.vehicle}
+                        {route.planned_date && <span className="ml-2 text-[#10B981]">📅 {route.planned_date}</span>}
+                      </div>
+                      <div className="text-xs text-white/50 mb-3">
+                        📍 Bu rotadaki tüm ATM&apos;ler {route.cash_center} NM&apos;ye bağlıdır • Rota sırası CIT firmasınca belirlenir
+                      </div>
+
+                      {/* Progress bar */}
+                      {route.status === "in-progress" && (
+                        <div className="mb-4">
+                          <div className="flex justify-between text-sm text-[#A7B8D8] mb-2">
+                            <span>İlerleme: {route.completed}/{route.atms_count} ATM</span>
+                            <span>{route.progress}%</span>
+                          </div>
+                          <div className="h-3 w-full bg-[#112544] rounded-full overflow-hidden">
+                            <div
+                              className="h-3 bg-gradient-to-r from-[#2E86FF] to-[#10B981] rounded-full transition-all duration-500"
+                              style={{ width: `${route.progress}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Stats grid */}
+                      <div className="grid grid-cols-3 gap-3 mb-4">
+                        <div className="bg-[#112544] rounded-lg p-3">
+                          <div className="text-xs text-[#A7B8D8]">ATM Sayısı</div>
+                          <div className="text-base font-bold mt-1">{route.atms_count}</div>
+                        </div>
+                        <div className="bg-[#112544] rounded-lg p-3">
+                          <div className="text-xs text-[#A7B8D8]">Tahmini Süre</div>
+                          <div className="text-base font-bold mt-1">{route.estimated_time}</div>
+                        </div>
+                        <div className="bg-[#112544] rounded-lg p-3">
+                          <div className="text-xs text-[#A7B8D8]">Toplam Nakit</div>
+                          <div className="text-base font-bold mt-1">{route.total_cash}</div>
+                        </div>
+                      </div>
+
+                      {/* Optimization suggestions */}
+                      {route.efficiency_score < 85 && (
+                        <div className="bg-[#F2B705]/10 rounded-lg p-3 mb-3">
+                          <div className="text-sm text-[#F2B705] font-semibold mb-1">💡 Optimizasyon Önerisi</div>
+                          <div className="text-sm text-white/80">
+                            {route.efficiency_score < 80
+                              ? `Rota sıralaması optimize edilebilir. 3 ATM konum bazlı yeniden sıralanarak ${(85 - route.efficiency_score) * 2} dakika tasarruf edilebilir.`
+                              : `2 ATM alternatif güzergaha alınarak ${(90 - route.efficiency_score)} dakika kazanç sağlanabilir.`
+                            }
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Action buttons */}
+                      <div className="flex gap-3">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setSelectedRoute(route); setShowRouteMapModal(true); }}
+                          className="flex-1 px-4 py-2.5 rounded-lg bg-[#2E86FF]/20 hover:bg-[#2E86FF]/30 text-sm text-[#2E86FF] font-semibold transition ring-1 ring-[#2E86FF]/50"
+                        >
+                          Haritada Göster
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setSelectedRoute(route); setShowRouteOptimizeModal(true); }}
+                          className="flex-1 px-4 py-2.5 rounded-lg bg-[#10B981]/20 hover:bg-[#10B981]/30 text-sm text-[#10B981] font-semibold transition ring-1 ring-[#10B981]/50"
+                        >
+                          İş Emri Aç
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setSelectedRoute(route); setShowRouteDetailsModal(true); }}
+                          className="px-4 py-2.5 rounded-lg bg-[#0E2142] hover:bg-[#1C2E52] text-sm text-[#A7B8D8] font-semibold transition ring-1 ring-[#2B416B]"
+                        >
+                          İş Emirleri
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-
-              {/* Progress bar */}
-              {route.status === "in-progress" && (
-                <div className="mb-4">
-                  <div className="flex justify-between text-sm text-[#A7B8D8] mb-2">
-                    <span>İlerleme: {route.completed}/{route.atms_count} ATM</span>
-                    <span>{route.progress}%</span>
-                  </div>
-                  <div className="h-3 w-full bg-[#112544] rounded-full overflow-hidden">
-                    <div 
-                      className="h-3 bg-gradient-to-r from-[#2E86FF] to-[#10B981] rounded-full transition-all duration-500"
-                      style={{ width: `${route.progress}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Stats grid */}
-              <div className="grid grid-cols-3 gap-4 mb-4">
-                <div className="bg-[#112544] rounded-lg p-3">
-                  <div className="text-sm text-[#A7B8D8]">ATM Sayısı</div>
-                  <div className="text-base font-bold mt-1">{route.atms_count}</div>
-                </div>
-                <div className="bg-[#112544] rounded-lg p-3">
-                  <div className="text-sm text-[#A7B8D8]">Tahmini Süre</div>
-                  <div className="text-base font-bold mt-1">{route.estimated_time}</div>
-                </div>
-                <div className="bg-[#112544] rounded-lg p-3">
-                  <div className="text-sm text-[#A7B8D8]">Toplam Nakit</div>
-                  <div className="text-base font-bold mt-1">{route.total_cash}</div>
-                </div>
-              </div>
-
-              {/* Optimization suggestions */}
-              {route.efficiency_score < 85 && (
-                <div className="bg-[#F2B705]/10 rounded-lg p-3 mb-3">
-                  <div className="text-sm text-[#F2B705] font-semibold mb-1.5">💡 Optimizasyon Önerisi</div>
-                  <div className="text-sm text-white/80">
-                    {route.efficiency_score < 80 
-                      ? `Rota sıralaması optimize edilebilir. 3 ATM konum bazlı yeniden sıralanarak ${(85 - route.efficiency_score) * 2} dakika tasarruf edilebilir.`
-                      : `2 ATM alternatif güzergaha alınarak ${(90 - route.efficiency_score)} dakika kazanç sağlanabilir.`
-                    }
-                  </div>
-                </div>
-              )}
-
-              {/* Action buttons */}
-              <div className="flex gap-3">
-                <button 
-                  onClick={() => { setSelectedRoute(route); setShowRouteMapModal(true); }}
-                  className="flex-1 px-4 py-2.5 rounded-lg bg-[#2E86FF]/20 hover:bg-[#2E86FF]/30 text-sm text-[#2E86FF] font-semibold transition ring-1 ring-[#2E86FF]/50"
-                >
-                  Haritada Göster
-                </button>
-                <button 
-                  onClick={() => { setSelectedRoute(route); setShowRouteOptimizeModal(true); }}
-                  className="flex-1 px-4 py-2.5 rounded-lg bg-[#10B981]/20 hover:bg-[#10B981]/30 text-sm text-[#10B981] font-semibold transition ring-1 ring-[#10B981]/50"
-                >
-                  İş Emri Aç
-                </button>
-                <button 
-                  onClick={() => { setSelectedRoute(route); setShowRouteDetailsModal(true); }}
-                  className="px-4 py-2.5 rounded-lg bg-[#0E2142] hover:bg-[#1C2E52] text-sm text-[#A7B8D8] font-semibold transition ring-1 ring-[#2B416B]"
-                >
-                  İş Emirleri
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -1982,46 +2745,61 @@ export default function CashFlowOpsPage() {
           <div className="space-y-3">
             {!data ? (
               <div className="text-[#A7B8D8] text-sm">Loading…</div>
-            ) : (
-              data.top_actions
-                .filter((a: any) => !selectedCashCenter || a.cash_center === selectedCashCenter)
-                .map((a: any) => (
-                <div key={a.atm_id} className="bg-[#0E2142]/60 rounded-xl p-3 ring-1 ring-[#2B416B]">
-                  <div className="flex items-center justify-between">
-                    <div className="font-semibold">ATM {a.atm_id}</div>
-                    <div className="text-xs text-[#A7B8D8]">{a.eta}</div>
-                  </div>
-                  <div className="text-xs text-white/80 mt-1">{a.atm_name || "N/A"}</div>
-                  <div className="text-xs text-white/70 mt-1">
-                    {a.city}/{a.district}
-                  </div>
-                  <div className="text-xs text-white/60 mt-1">
-                    📍 {a.cash_center}
-                  </div>
-                  <div className="mt-2 flex items-center justify-between">
-                    <div className="text-sm">
-                      <span className="text-white/70">Action:</span>{" "}
-                      <span className="text-white font-semibold">{a.action}</span>
+            ) : (() => {
+              const actions = data.top_actions.filter((a: any) => !selectedCashCenter || a.cash_center === selectedCashCenter);
+              const visible = showAllActions ? actions : actions.slice(0, 3);
+              return (
+                <>
+                  {visible.map((a: any) => (
+                    <div key={a.atm_id} className="bg-[#0E2142]/60 rounded-xl p-3 ring-1 ring-[#2B416B]">
+                      <div className="flex items-center justify-between">
+                        <div className="font-semibold">ATM {a.atm_id}</div>
+                        <div className="text-xs text-[#A7B8D8]">{a.eta}</div>
+                      </div>
+                      <div className="text-xs text-white/80 mt-1">{a.atm_name || "N/A"}</div>
+                      <div className="text-xs text-white/70 mt-1">
+                        {a.city}/{a.district}
+                      </div>
+                      <div className="text-xs text-white/60 mt-1">
+                        📍 {a.cash_center}
+                      </div>
+                      <div className="mt-2 flex items-center justify-between">
+                        <div className="text-sm">
+                          <span className="text-white/70">Action:</span>{" "}
+                          <span className="text-white font-semibold">{a.action}</span>
+                        </div>
+                        <div
+                          className={`text-xs font-semibold ${
+                            a.risk === "High" ? "text-[#F2B705]" : a.risk === "Medium" ? "text-[#2E86FF]" : "text-white/70"
+                          }`}
+                        >
+                          {a.risk}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          alert(`Cash Task oluşturuldu!\n\nATM: ${a.atm_id}\nLokasyon: ${a.city}/${a.district}\nNakit Merkezi: ${a.cash_center}\nAksiyon: ${a.action}\nRisk: ${a.risk}\nETA: ${a.eta}`);
+                        }}
+                        className="mt-3 w-full px-3 py-2 rounded-xl bg-gradient-to-r from-[#2E86FF] to-[#0066FF] hover:from-[#0066FF] hover:to-[#2E86FF] text-white text-xs font-semibold shadow-lg hover:shadow-xl transition-all cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
+                      >
+                        ✅ Create Cash Task
+                      </button>
                     </div>
-                    <div
-                      className={`text-xs font-semibold ${
-                        a.risk === "High" ? "text-[#F2B705]" : a.risk === "Medium" ? "text-[#2E86FF]" : "text-white/70"
-                      }`}
+                  ))}
+                  {actions.length > 3 && (
+                    <button
+                      onClick={() => setShowAllActions(!showAllActions)}
+                      className="w-full py-2 rounded-xl bg-[#0E2142] ring-1 ring-[#2B416B] hover:ring-[#2E86FF] text-xs text-[#A7B8D8] hover:text-white transition flex items-center justify-center gap-2"
                     >
-                      {a.risk}
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => {
-                      alert(`Cash Task oluşturuldu!\n\nATM: ${a.atm_id}\nLokasyon: ${a.city}/${a.district}\nNakit Merkezi: ${a.cash_center}\nAksiyon: ${a.action}\nRisk: ${a.risk}\nETA: ${a.eta}`);
-                    }}
-                    className="mt-3 w-full px-3 py-2 rounded-xl bg-gradient-to-r from-[#2E86FF] to-[#0066FF] hover:from-[#0066FF] hover:to-[#2E86FF] text-white text-xs font-semibold shadow-lg hover:shadow-xl transition-all cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
-                  >
-                    ✅ Create Cash Task
-                  </button>
-                </div>
-              ))
-            )}
+                      {showAllActions
+                        ? <><span className="inline-block rotate-180">▼</span> Daha Az Göster</>
+                        : <><span>▼</span> {actions.length - 3} işlem daha göster</>
+                      }
+                    </button>
+                  )}
+                </>
+              );
+            })()}
           </div>
         </div>
       </div>
@@ -2526,95 +3304,152 @@ export default function CashFlowOpsPage() {
         </div>
       )}
 
-      {/* Cash Center Search Modal */}
+      {/* Cash Center Search Modal — multi-select */}
       {showCashCenterSearch && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4" style={{ zIndex: 9999 }}>
           <div className="bg-[#112544] rounded-2xl w-full max-w-2xl ring-2 ring-[#2B416B] flex flex-col" style={{ maxHeight: '90vh' }}>
+            {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-[#2B416B] bg-[#0E2142]/60 flex-shrink-0">
-              <div className="text-lg font-semibold">🏦 Nakit Merkezi Seç</div>
-              <button onClick={() => { setShowCashCenterSearch(false); setCashCenterSearchTerm(""); }} className="text-[#A7B8D8] hover:text-white text-2xl">&times;</button>
-            </div>
-            
-            <div className="p-4 flex-1 overflow-y-auto">
-              {/* Search input */}
-              <div className="mb-4">
-                <input
-                  type="text"
-                  placeholder="NM ara..."
-                  value={cashCenterSearchTerm}
-                  onChange={(e) => setCashCenterSearchTerm(e.target.value)}
-                  className="w-full px-4 py-2 rounded-lg bg-[#0E2142] text-white placeholder-[#A7B8D8] border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#2E86FF]"
-                />
+              <div>
+                <div className="text-lg font-semibold">🏦 Nakit Merkezi Seç</div>
+                <div className="text-xs text-[#A7B8D8] mt-0.5">Sekme olarak görmek istediğiniz NM&apos;leri işaretleyin</div>
               </div>
+              <button
+                onClick={() => { setShowCashCenterSearch(false); setCashCenterSearchTerm(""); }}
+                className="text-[#A7B8D8] hover:text-white text-2xl"
+              >
+                &times;
+              </button>
+            </div>
 
-              {/* Cash centers list */}
-              <div className="space-y-2">
-                {allCashCenters
-                  .filter(cc => cc.name.toLowerCase().includes(cashCenterSearchTerm.toLowerCase()))
-                  .map((cc) => {
-                    const isSelected = selectedCashCenter === cc.name;
-                    
-                    // Calculate completed and remaining tasks for this NM
-                    const nmRoutes = citRoutes.filter(r => r.cash_center === cc.name);
-                    const completedRoutes = nmRoutes.filter(r => r.status === "completed" || r.progress === 100);
-                    const remainingRoutes = nmRoutes.filter(r => r.status !== "completed" && r.progress !== 100);
-                    const completionRate = nmRoutes.length > 0 ? (completedRoutes.length / nmRoutes.length * 100) : 0;
-                    
-                    return (
-                      <div
-                        key={cc.name}
+            {/* Selected count badge */}
+            <div className="px-4 pt-3 flex items-center justify-between flex-shrink-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                {selectedNmTabs.length === 0 ? (
+                  <span className="text-xs text-[#A7B8D8]">Henüz seçili NM yok</span>
+                ) : (
+                  selectedNmTabs.map(nm => (
+                    <span
+                      key={nm}
+                      className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-[#2E86FF]/20 text-[#2E86FF] ring-1 ring-[#2E86FF]/50"
+                    >
+                      {nm}
+                      <button
                         onClick={() => {
-                          setSelectedCashCenter(cc.name);
-                          setShowCashCenterSearch(false);
-                          setCashCenterSearchTerm("");
+                          setSelectedNmTabs(prev => prev.filter(t => t !== nm));
+                          if (selectedCashCenter === nm) setSelectedCashCenter("");
                         }}
-                        className={`p-4 rounded-lg transition cursor-pointer ${
-                          isSelected
-                            ? "bg-[#2E86FF]/30 ring-2 ring-[#2E86FF]"
-                            : "bg-[#0E2142] ring-1 ring-[#2B416B] hover:ring-[#2E86FF]"
-                        }`}
+                        className="ml-0.5 hover:text-white"
                       >
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex-1">
-                            <div className="font-semibold text-sm flex items-center gap-2">
-                              {cc.name}
-                              {isSelected && <span className="text-xs px-2 py-0.5 rounded-full bg-[#2E86FF]/30 text-[#2E86FF]">✓ Seçili</span>}
-                            </div>
-                            <div className="text-xs text-[#A7B8D8] mt-1">
+                        ×
+                      </button>
+                    </span>
+                  ))
+                )}
+              </div>
+              {selectedNmTabs.length > 0 && (
+                <button
+                  onClick={() => { setSelectedNmTabs([]); setSelectedCashCenter(""); }}
+                  className="text-xs text-[#E63946] hover:text-white transition shrink-0 ml-2"
+                >
+                  Tümünü Kaldır
+                </button>
+              )}
+            </div>
+
+            {/* Search input */}
+            <div className="px-4 pt-3 pb-2 flex-shrink-0">
+              <input
+                type="text"
+                placeholder="NM ara..."
+                value={cashCenterSearchTerm}
+                onChange={(e) => setCashCenterSearchTerm(e.target.value)}
+                className="w-full px-4 py-2 rounded-lg bg-[#0E2142] text-white placeholder-[#A7B8D8] border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#2E86FF]"
+              />
+            </div>
+
+            {/* Cash centers list */}
+            <div className="px-4 pb-2 flex-1 overflow-y-auto space-y-2">
+              {allCashCenters
+                .filter(cc => cc.name.toLowerCase().includes(cashCenterSearchTerm.toLowerCase()))
+                .map((cc) => {
+                  const isPinned = selectedNmTabs.includes(cc.name);
+                  const nmRoutes = citRoutes.filter(r => r.cash_center === cc.name);
+                  const completedRoutes = nmRoutes.filter(r => r.status === "completed" || r.progress === 100);
+                  const remainingRoutes = nmRoutes.filter(r => r.status !== "completed" && r.progress !== 100);
+                  const completionRate = nmRoutes.length > 0 ? (completedRoutes.length / nmRoutes.length * 100) : 0;
+
+                  return (
+                    <div
+                      key={cc.name}
+                      onClick={() => {
+                        if (isPinned) {
+                          setSelectedNmTabs(prev => prev.filter(t => t !== cc.name));
+                          if (selectedCashCenter === cc.name) setSelectedCashCenter("");
+                        } else {
+                          setSelectedNmTabs(prev => [...prev, cc.name]);
+                        }
+                      }}
+                      className={`p-4 rounded-lg transition cursor-pointer ${
+                        isPinned
+                          ? "bg-[#2E86FF]/20 ring-2 ring-[#2E86FF]"
+                          : "bg-[#0E2142] ring-1 ring-[#2B416B] hover:ring-[#2E86FF]/50"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          {/* Checkbox */}
+                          <div className={`w-5 h-5 rounded flex items-center justify-center shrink-0 ring-2 transition ${
+                            isPinned ? "bg-[#2E86FF] ring-[#2E86FF]" : "bg-[#112544] ring-[#2B416B]"
+                          }`}>
+                            {isPinned && <span className="text-white text-xs font-bold">✓</span>}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-semibold text-sm truncate">{cc.name}</div>
+                            <div className="text-xs text-[#A7B8D8] mt-0.5">
                               {cc.atm_count} ATM • {cc.offsite_count} Offsite
                             </div>
                           </div>
-                          {isSelected && (
-                            <span className="text-[#2E86FF] text-2xl">✓</span>
-                          )}
                         </div>
-                        
-                        {/* Work status */}
-                        {nmRoutes.length > 0 && (
-                          <div className="mt-3 pt-3 border-t border-[#2B416B]/50">
-                            <div className="flex items-center justify-between text-xs mb-2">
-                              <div className="flex items-center gap-4">
-                                <span className="text-[#10B981]">
-                                  ✓ Biten: <span className="font-semibold">{completedRoutes.length}</span>
-                                </span>
-                                <span className="text-[#F2B705]">
-                                  ⏳ Kalan: <span className="font-semibold">{remainingRoutes.length}</span>
-                                </span>
-                              </div>
-                              <span className="font-bold text-white">{completionRate.toFixed(0)}%</span>
-                            </div>
-                            <div className="h-1.5 w-full bg-[#112544] rounded-full overflow-hidden">
-                              <div 
-                                className="h-1.5 bg-gradient-to-r from-[#10B981] to-[#2E86FF] rounded-full transition-all"
-                                style={{ width: `${completionRate}%` }}
-                              />
-                            </div>
-                          </div>
+                        {isPinned && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-[#2E86FF]/30 text-[#2E86FF] shrink-0 ml-2">Sekmede</span>
                         )}
                       </div>
-                    );
-                  })}
+
+                      {/* Work status (only shown when routes exist) */}
+                      {nmRoutes.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-[#2B416B]/50 ml-8">
+                          <div className="flex items-center justify-between text-xs mb-1.5">
+                            <div className="flex items-center gap-3">
+                              <span className="text-[#10B981]">✓ Biten: <span className="font-semibold">{completedRoutes.length}</span></span>
+                              <span className="text-[#F2B705]">⏳ Kalan: <span className="font-semibold">{remainingRoutes.length}</span></span>
+                            </div>
+                            <span className="font-bold text-white">{completionRate.toFixed(0)}%</span>
+                          </div>
+                          <div className="h-1.5 w-full bg-[#112544] rounded-full overflow-hidden">
+                            <div
+                              className="h-1.5 bg-gradient-to-r from-[#10B981] to-[#2E86FF] rounded-full transition-all"
+                              style={{ width: `${completionRate}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+
+            {/* Footer confirm button */}
+            <div className="p-4 border-t border-[#2B416B] bg-[#0E2142]/60 flex-shrink-0 flex items-center justify-between gap-3">
+              <div className="text-xs text-[#A7B8D8]">
+                {selectedNmTabs.length} NM seçili
               </div>
+              <button
+                onClick={() => { setShowCashCenterSearch(false); setCashCenterSearchTerm(""); }}
+                className="px-6 py-2 rounded-lg bg-[#2E86FF] text-white text-sm font-semibold hover:bg-[#2E86FF]/80 transition"
+              >
+                Tamam
+              </button>
             </div>
           </div>
         </div>
@@ -2721,7 +3556,7 @@ export default function CashFlowOpsPage() {
                   <span>📊</span> Excel İndir
                 </button>
               </div>
-              <button onClick={() => { setShowSlaExceededModal(false); setSelectedSlaAtm(null); }} className="text-[#A7B8D8] hover:text-white text-2xl">&times;</button>
+              <button onClick={() => { setShowSlaExceededModal(false); setSelectedSlaAtm(null); setExpandedSlaAtms(new Set()); }} className="text-[#A7B8D8] hover:text-white text-2xl">&times;</button>
             </div>
             
             <div className="flex flex-1 min-h-0">
@@ -2862,10 +3697,89 @@ export default function CashFlowOpsPage() {
                           }}
                           className="flex-1 px-3 py-2 rounded-lg bg-[#2E86FF]/20 hover:bg-[#2E86FF]/30 text-xs text-[#2E86FF] font-semibold transition ring-1 ring-[#2E86FF]/50"
                         >
-                          📍 Yakın ATM'leri Göster
+                          📍 Yakın ATM&apos;leri Göster
                         </button>
                       )}
                     </div>
+
+                    {/* Kaset Detayı - Collapsible */}
+                    {(() => {
+                      const cassettes: any[] = atm.cassettes || [];
+                      const isKasetOpen = expandedSlaAtms.has(atm.atm_id);
+                      const atmTRY = cassettes.filter((c: any) => c.currency === 'TRY').reduce((s: number, c: any) => s + c.denomination * c.quantity, 0);
+                      const atmUSD = cassettes.filter((c: any) => c.currency === 'USD').reduce((s: number, c: any) => s + c.denomination * c.quantity, 0);
+                      const atmEUR = cassettes.filter((c: any) => c.currency === 'EUR').reduce((s: number, c: any) => s + c.denomination * c.quantity, 0);
+                      const atmTRYEquiv = atmTRY + atmUSD * USD_RATE + atmEUR * EUR_RATE;
+                      if (cassettes.length === 0) return null;
+                      return (
+                        <div className="mt-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedSlaAtms(prev => {
+                                const next = new Set(prev);
+                                isKasetOpen ? next.delete(atm.atm_id) : next.add(atm.atm_id);
+                                return next;
+                              });
+                            }}
+                            className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg bg-[#112544] hover:bg-[#1C2E52] text-xs text-[#A7B8D8] hover:text-white transition ring-1 ring-[#2B416B]"
+                          >
+                            <span className="flex items-center gap-1.5">
+                              <span className={`transition-transform duration-150 ${isKasetOpen ? 'rotate-90' : ''}`}>▶</span>
+                              📦 İkmal Kaset Detayı
+                              {atm.hasFx && <span className="px-1 rounded text-[10px] bg-[#F2B705]/20 text-[#F2B705] font-bold">FX</span>}
+                            </span>
+                            <span className="font-bold text-white">₺{atmTRYEquiv.toLocaleString('tr-TR')}{atmUSD > 0 ? ` + $${atmUSD.toLocaleString('tr-TR')}` : ''}{atmEUR > 0 ? ` + €${atmEUR.toLocaleString('tr-TR')}` : ''}</span>
+                          </button>
+                          {isKasetOpen && (
+                            <div className="mt-1 bg-[#0A1628] rounded-lg p-2 ring-1 ring-[#2B416B]/60">
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="text-[#A7B8D8] border-b border-[#2B416B]/60">
+                                    <th className="text-left py-1 font-medium">Kaset</th>
+                                    <th className="text-center py-1 font-medium">Dv.</th>
+                                    <th className="text-center py-1 font-medium">Nominal</th>
+                                    <th className="text-center py-1 font-medium">Adet</th>
+                                    <th className="text-right py-1 font-medium">Toplam</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {cassettes.map((c: any) => (
+                                    <tr key={c.id} className="border-b border-[#2B416B]/30">
+                                      <td className="py-1.5 text-[#A7B8D8]">#{c.id}</td>
+                                      <td className="py-1.5 text-center">
+                                        <span className={`px-1 py-0.5 rounded text-[10px] font-bold ${
+                                          c.currency === 'TRY' ? 'bg-[#10B981]/20 text-[#10B981]' :
+                                          c.currency === 'USD' ? 'bg-[#2E86FF]/20 text-[#2E86FF]' :
+                                          'bg-[#A7B8D8]/20 text-[#A7B8D8]'
+                                        }`}>{c.currency}</span>
+                                      </td>
+                                      <td className="py-1.5 text-center font-semibold">{CURRENCY_SYMBOL[c.currency]}{c.denomination}</td>
+                                      <td className="py-1.5 text-center">{c.quantity.toLocaleString('tr-TR')}</td>
+                                      <td className="py-1.5 text-right font-bold">{CURRENCY_SYMBOL[c.currency]}{(c.denomination * c.quantity).toLocaleString('tr-TR')}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                                <tfoot>
+                                  <tr className="border-t border-[#2B416B] bg-[#0E2142]/60">
+                                    <td colSpan={3} className="py-1.5 text-[#A7B8D8] font-semibold">Toplam</td>
+                                    <td className="py-1.5 text-center text-white font-semibold">{cassettes.reduce((s: number, c: any) => s + c.quantity, 0)}</td>
+                                    <td className="py-1.5 text-right">
+                                      {atmTRY > 0 && <div className="font-bold text-white">₺{atmTRY.toLocaleString('tr-TR')}</div>}
+                                      {atmUSD > 0 && <div className="font-bold text-[#2E86FF]">${atmUSD.toLocaleString('tr-TR')}</div>}
+                                      {atmEUR > 0 && <div className="font-bold text-[#A7B8D8]">€{atmEUR.toLocaleString('tr-TR')}</div>}
+                                      {(atmUSD > 0 || atmEUR > 0) && (
+                                        <div className="text-[10px] text-white/40 mt-0.5">≈ ₺{atmTRYEquiv.toLocaleString('tr-TR')}</div>
+                                      )}
+                                    </td>
+                                  </tr>
+                                </tfoot>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
                 })}
@@ -3076,41 +3990,198 @@ export default function CashFlowOpsPage() {
       )}
 
       {/* Route Map Modal */}
-      {showRouteMapModal && selectedRoute && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4" style={{ zIndex: 10000 }}>
-          <div className="bg-[#112544] rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden ring-2 ring-[#2B416B]">
-            <div className="flex items-center justify-between p-4 border-b border-[#2B416B] bg-[#0E2142]/60">
-              <div className="text-lg font-semibold">📍 {selectedRoute.cash_center} NM Rotası - Harita</div>
-              <button onClick={() => setShowRouteMapModal(false)} className="text-[#A7B8D8] hover:text-white text-2xl">&times;</button>
-            </div>
-            
-            <div className="p-4">
-              <div className="h-[600px] w-full rounded-xl overflow-hidden ring-1 ring-[#2B416B]">
-                <RouteMapComponent route={selectedRoute} />
+      {showRouteMapModal && selectedRoute && (() => {
+        // Grand totals across all ATMs in route
+        const allAtms: any[] = selectedRoute.atms || [];
+        let grandTRY = 0, grandUSD = 0, grandEUR = 0;
+        allAtms.forEach((atm: any) => {
+          (atm.cassettes || []).forEach((c: any) => {
+            const val = c.denomination * c.quantity;
+            if (c.currency === 'TRY') grandTRY += val;
+            else if (c.currency === 'USD') grandUSD += val;
+            else if (c.currency === 'EUR') grandEUR += val;
+          });
+        });
+        const grandTRYEquiv = grandTRY + grandUSD * USD_RATE + grandEUR * EUR_RATE;
+
+        return (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4" style={{ zIndex: 10000 }}>
+            <div className="bg-[#112544] rounded-2xl w-full ring-2 ring-[#2B416B] flex flex-col" style={{ maxWidth: '1200px', maxHeight: '92vh' }}>
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-3 border-b border-[#2B416B] bg-[#0E2142]/60 flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  <span className="text-lg font-semibold">📍 {selectedRoute.cash_center} NM Rotası</span>
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                    selectedRoute.operation_type === 'replenishment' ? 'bg-[#10B981]/20 text-[#10B981]' :
+                    selectedRoute.operation_type === 'collection' ? 'bg-[#F2B705]/20 text-[#F2B705]' :
+                    'bg-[#2E86FF]/20 text-[#2E86FF]'
+                  }`}>
+                    {selectedRoute.operation_type === 'replenishment' ? 'İkmal' : selectedRoute.operation_type === 'collection' ? 'Para Toplama' : 'Karma'}
+                  </span>
+                  <span className="text-xs text-[#A7B8D8]">{allAtms.length} ATM</span>
+                </div>
+                <button onClick={() => { setShowRouteMapModal(false); setExpandedMapAtms(new Set()); }} className="text-[#A7B8D8] hover:text-white text-2xl">&times;</button>
               </div>
-              
-              <div className="mt-4 grid grid-cols-4 gap-3">
-                <div className="bg-[#0E2142] rounded-lg p-3 ring-1 ring-[#2B416B]">
-                  <div className="text-xs text-[#A7B8D8]">Nakit Merkezi</div>
-                  <div className="text-sm font-bold mt-1">{selectedRoute.cash_center}</div>
+
+              {/* Body: map left + ATM list right */}
+              <div className="flex flex-1 min-h-0 overflow-hidden">
+                {/* Map */}
+                <div className="flex-1 min-w-0 p-3">
+                  <div className="h-full rounded-xl overflow-hidden ring-1 ring-[#2B416B]" style={{ minHeight: '400px' }}>
+                    <RouteMapComponent route={selectedRoute} />
+                  </div>
                 </div>
-                <div className="bg-[#0E2142] rounded-lg p-3 ring-1 ring-[#2B416B]">
-                  <div className="text-xs text-[#A7B8D8]">ATM Sayısı</div>
-                  <div className="text-sm font-bold mt-1">{selectedRoute.atms_count}</div>
-                </div>
-                <div className="bg-[#0E2142] rounded-lg p-3 ring-1 ring-[#2B416B]">
-                  <div className="text-xs text-[#A7B8D8]">Toplam Mesafe</div>
-                  <div className="text-sm font-bold mt-1">{(selectedRoute.atms_count * 8.5).toFixed(1)} km</div>
-                </div>
-                <div className="bg-[#0E2142] rounded-lg p-3 ring-1 ring-[#2B416B]">
-                  <div className="text-xs text-[#A7B8D8]">Verimlilik</div>
-                  <div className="text-sm font-bold mt-1 text-[#10B981]">{selectedRoute.efficiency_score}%</div>
+
+                {/* ATM Detail Panel */}
+                <div className="w-[420px] flex-shrink-0 flex flex-col border-l border-[#2B416B] overflow-hidden">
+                  {/* Summary strip */}
+                  <div className="grid grid-cols-3 gap-2 p-3 border-b border-[#2B416B] bg-[#0E2142]/40 flex-shrink-0">
+                    <div className="text-center">
+                      <div className="text-xs text-[#A7B8D8]">ATM</div>
+                      <div className="font-bold text-white">{allAtms.length}</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-xs text-[#A7B8D8]">Süre</div>
+                      <div className="font-bold text-white">{selectedRoute.estimated_time}</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-xs text-[#A7B8D8]">Verimlilik</div>
+                      <div className="font-bold text-[#10B981]">{selectedRoute.efficiency_score}%</div>
+                    </div>
+                  </div>
+
+                  {/* ATM list */}
+                  <div className="flex-1 overflow-y-auto">
+                    {allAtms.map((atm: any, idx: number) => {
+                      const isExpanded = expandedMapAtms.has(String(atm.atm_id) + idx);
+                      const cassettes: any[] = atm.cassettes || [];
+                      const atmTRY = cassettes.filter((c: any) => c.currency === 'TRY').reduce((s: number, c: any) => s + c.denomination * c.quantity, 0);
+                      const atmUSD = cassettes.filter((c: any) => c.currency === 'USD').reduce((s: number, c: any) => s + c.denomination * c.quantity, 0);
+                      const atmEUR = cassettes.filter((c: any) => c.currency === 'EUR').reduce((s: number, c: any) => s + c.denomination * c.quantity, 0);
+                      const atmTRYEquiv = atmTRY + atmUSD * USD_RATE + atmEUR * EUR_RATE;
+
+                      return (
+                        <div key={String(atm.atm_id) + idx} className={`border-b border-[#2B416B]/40 ${
+                          isExpanded ? 'bg-[#0E2142]/60' : 'hover:bg-[#0E2142]/30'
+                        }`}>
+                          {/* ATM row header */}
+                          <div
+                            className="flex items-center gap-2 px-3 py-2.5 cursor-pointer select-none"
+                            onClick={() => setExpandedMapAtms(prev => {
+                              const next = new Set(prev);
+                              isExpanded ? next.delete(String(atm.atm_id) + idx) : next.add(String(atm.atm_id) + idx);
+                              return next;
+                            })}
+                          >
+                            <span className={`text-xs font-bold w-5 text-center transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''} text-[#A7B8D8]`}>▶</span>
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                              atm.operation === 'ikmal' ? 'bg-[#10B981]/20 text-[#10B981]' : 'bg-[#F2B705]/20 text-[#F2B705]'
+                            }`}>{idx + 1}</div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-xs font-semibold truncate">{atm.atm_name || `ATM ${atm.atm_id}`}</div>
+                              <div className="text-[10px] text-[#A7B8D8] truncate">{atm.city} / {atm.district}</div>
+                            </div>
+                            <div className="text-right flex-shrink-0">
+                              {atm.hasFx && <span className="text-[10px] bg-[#F2B705]/20 text-[#F2B705] px-1 rounded mr-1">FX</span>}
+                              <div className="text-xs font-bold text-white">₺{atmTRYEquiv.toLocaleString('tr-TR')}</div>
+                              {atmUSD > 0 && <div className="text-[10px] text-[#2E86FF]">${atmUSD.toLocaleString('tr-TR')}</div>}
+                              {atmEUR > 0 && <div className="text-[10px] text-[#A7B8D8]">€{atmEUR.toLocaleString('tr-TR')}</div>}
+                            </div>
+                          </div>
+
+                          {/* Cassette detail */}
+                          {isExpanded && (
+                            <div className="px-3 pb-3">
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="text-[#A7B8D8] border-b border-[#2B416B]/60">
+                                    <th className="text-left py-1 font-medium">Kaset</th>
+                                    <th className="text-center py-1 font-medium">Para Birimi</th>
+                                    <th className="text-center py-1 font-medium">Nominal</th>
+                                    <th className="text-center py-1 font-medium">Adet</th>
+                                    <th className="text-right py-1 font-medium">Toplam</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {cassettes.map((c: any) => (
+                                    <tr key={c.id} className="border-b border-[#2B416B]/30 hover:bg-[#112544]/50">
+                                      <td className="py-1.5 text-[#A7B8D8]">Kaset {c.id}</td>
+                                      <td className="py-1.5 text-center">
+                                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                          c.currency === 'TRY' ? 'bg-[#10B981]/20 text-[#10B981]' :
+                                          c.currency === 'USD' ? 'bg-[#2E86FF]/20 text-[#2E86FF]' :
+                                          'bg-[#A7B8D8]/20 text-[#A7B8D8]'
+                                        }`}>{c.currency}</span>
+                                      </td>
+                                      <td className="py-1.5 text-center font-semibold">
+                                        {CURRENCY_SYMBOL[c.currency]}{c.denomination}
+                                      </td>
+                                      <td className="py-1.5 text-center">{c.quantity.toLocaleString('tr-TR')}</td>
+                                      <td className="py-1.5 text-right font-bold">
+                                        {CURRENCY_SYMBOL[c.currency]}{(c.denomination * c.quantity).toLocaleString('tr-TR')}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                                <tfoot>
+                                  <tr className="border-t border-[#2B416B] bg-[#0E2142]/40">
+                                    <td colSpan={3} className="py-1.5 text-[#A7B8D8] font-semibold">ATM Toplam</td>
+                                    <td className="py-1.5 text-center text-white font-semibold">{cassettes.reduce((s: number, c: any) => s + c.quantity, 0).toLocaleString('tr-TR')}</td>
+                                    <td className="py-1.5 text-right">
+                                      <div className="font-bold text-white">₺{atmTRY.toLocaleString('tr-TR')}</div>
+                                      {atmUSD > 0 && <div className="text-[#2E86FF] font-bold">${atmUSD.toLocaleString('tr-TR')}</div>}
+                                      {atmEUR > 0 && <div className="text-[#A7B8D8] font-bold">€{atmEUR.toLocaleString('tr-TR')}</div>}
+                                      {(atmUSD > 0 || atmEUR > 0) && (
+                                        <div className="text-[10px] text-white/50 mt-0.5">≈ ₺{atmTRYEquiv.toLocaleString('tr-TR')}</div>
+                                      )}
+                                    </td>
+                                  </tr>
+                                </tfoot>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Grand Total Footer */}
+                  <div className="flex-shrink-0 border-t border-[#2B416B] bg-[#0E2142]/80 p-3">
+                    <div className="text-xs text-[#A7B8D8] font-semibold mb-2">🏦 ROTA GENEL TOPLAM</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {grandTRY > 0 && (
+                        <div className="bg-[#10B981]/10 rounded-lg p-2 ring-1 ring-[#10B981]/30">
+                          <div className="text-[10px] text-[#10B981]">TRY</div>
+                          <div className="text-sm font-bold text-white">₺{grandTRY.toLocaleString('tr-TR')}</div>
+                        </div>
+                      )}
+                      {grandUSD > 0 && (
+                        <div className="bg-[#2E86FF]/10 rounded-lg p-2 ring-1 ring-[#2E86FF]/30">
+                          <div className="text-[10px] text-[#2E86FF]">USD</div>
+                          <div className="text-sm font-bold text-white">${grandUSD.toLocaleString('tr-TR')}</div>
+                        </div>
+                      )}
+                      {grandEUR > 0 && (
+                        <div className="bg-[#A7B8D8]/10 rounded-lg p-2 ring-1 ring-[#A7B8D8]/30">
+                          <div className="text-[10px] text-[#A7B8D8]">EUR</div>
+                          <div className="text-sm font-bold text-white">€{grandEUR.toLocaleString('tr-TR')}</div>
+                        </div>
+                      )}
+                      <div className="bg-[#F2B705]/10 rounded-lg p-2 ring-1 ring-[#F2B705]/30 col-span-2">
+                        <div className="text-[10px] text-[#F2B705]">TRY Karşılığı Genel Toplam</div>
+                        <div className="text-base font-bold text-white">₺{grandTRYEquiv.toLocaleString('tr-TR')}</div>
+                        {(grandUSD > 0 || grandEUR > 0) && (
+                          <div className="text-[10px] text-white/50 mt-0.5">$1 = ₺{USD_RATE} • €1 = ₺{EUR_RATE} kur ile hesaplandı</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Route Work Order Modal (İş Emri Açma) */}
       {showRouteOptimizeModal && selectedRoute && (
@@ -3264,7 +4335,7 @@ export default function CashFlowOpsPage() {
           <div className="bg-[#112544] rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden ring-2 ring-[#2B416B]">
             <div className="flex items-center justify-between p-4 border-b border-[#2B416B] bg-[#0E2142]/60">
               <div className="text-lg font-semibold">📋 {selectedRoute.cash_center} NM - İş Emirleri ({selectedRoute.atms.length} ATM)</div>
-              <button onClick={() => { setShowRouteDetailsModal(false); setShowAllRouteAtms(false); }} className="text-[#A7B8D8] hover:text-white text-2xl">&times;</button>
+              <button onClick={() => { setShowRouteDetailsModal(false); setShowAllRouteAtms(false); setExpandedWorkOrderAtms(new Set()); }} className="text-[#A7B8D8] hover:text-white text-2xl">&times;</button>
             </div>
             
             <div className="overflow-y-auto p-4" style={{ maxHeight: "calc(90vh - 80px)" }}>
@@ -3299,7 +4370,15 @@ export default function CashFlowOpsPage() {
                 </div>
 
                 <div className="space-y-2">
-                  {(showAllRouteAtms ? selectedRoute.atms : selectedRoute.atms.slice(0, 5)).map((atm: any, idx: number) => (
+                  {(showAllRouteAtms ? selectedRoute.atms : selectedRoute.atms.slice(0, 5)).map((atm: any, idx: number) => {
+                    const cassettes: any[] = atm.cassettes || [];
+                    const woKey = `wo-${atm.atm_id}`;
+                    const isKasetOpen = expandedWorkOrderAtms.has(woKey);
+                    const atmTRY = cassettes.filter((c: any) => c.currency === 'TRY').reduce((s: number, c: any) => s + c.denomination * c.quantity, 0);
+                    const atmUSD = cassettes.filter((c: any) => c.currency === 'USD').reduce((s: number, c: any) => s + c.denomination * c.quantity, 0);
+                    const atmEUR = cassettes.filter((c: any) => c.currency === 'EUR').reduce((s: number, c: any) => s + c.denomination * c.quantity, 0);
+                    const atmTRYEquiv = atmTRY + atmUSD * USD_RATE + atmEUR * EUR_RATE;
+                    return (
                     <div key={atm.atm_id} className="bg-[#112544] rounded-lg p-3 hover:bg-[#1C2E52] transition">
                       <div className="flex items-start gap-3">
                         <div className="flex flex-col items-center gap-1">
@@ -3348,10 +4427,84 @@ export default function CashFlowOpsPage() {
                               <span className="font-semibold ml-1">{idx + 1}. Durağı</span>
                             </div>
                           </div>
+
+                          {/* Kaset Detayı — sadece ikmal ATM'leri için */}
+                          {atm.operation === "ikmal" && cassettes.length > 0 && (
+                            <div className="mt-2">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExpandedWorkOrderAtms(prev => {
+                                    const next = new Set(prev);
+                                    isKasetOpen ? next.delete(woKey) : next.add(woKey);
+                                    return next;
+                                  });
+                                }}
+                                className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg bg-[#0A1628] hover:bg-[#0E2142] text-xs text-[#A7B8D8] hover:text-white transition ring-1 ring-[#2B416B]/60"
+                              >
+                                <span className="flex items-center gap-1.5">
+                                  <span className={`transition-transform duration-150 ${isKasetOpen ? 'rotate-90' : ''}`}>▶</span>
+                                  📦 Kaset Detayı
+                                  {atm.hasFx && <span className="px-1 rounded text-[10px] bg-[#F2B705]/20 text-[#F2B705] font-bold">FX</span>}
+                                </span>
+                                <span className="font-bold text-white">
+                                  ₺{atmTRY.toLocaleString('tr-TR')}
+                                  {atmUSD > 0 && ` + $${atmUSD.toLocaleString('tr-TR')}`}
+                                  {atmEUR > 0 && ` + €${atmEUR.toLocaleString('tr-TR')}`}
+                                </span>
+                              </button>
+                              {isKasetOpen && (
+                                <div className="mt-1 bg-[#0A1628] rounded-lg p-2 ring-1 ring-[#2B416B]/40">
+                                  <table className="w-full text-xs">
+                                    <thead>
+                                      <tr className="text-[#A7B8D8] border-b border-[#2B416B]/60">
+                                        <th className="text-left py-1 font-medium">Kaset</th>
+                                        <th className="text-center py-1 font-medium">Dv.</th>
+                                        <th className="text-center py-1 font-medium">Nominal</th>
+                                        <th className="text-center py-1 font-medium">Adet</th>
+                                        <th className="text-right py-1 font-medium">Toplam</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {cassettes.map((c: any) => (
+                                        <tr key={c.id} className="border-b border-[#2B416B]/30">
+                                          <td className="py-1.5 text-[#A7B8D8]">#{c.id}</td>
+                                          <td className="py-1.5 text-center">
+                                            <span className={`px-1 py-0.5 rounded text-[10px] font-bold ${
+                                              c.currency === 'TRY' ? 'bg-[#10B981]/20 text-[#10B981]' :
+                                              c.currency === 'USD' ? 'bg-[#2E86FF]/20 text-[#2E86FF]' :
+                                              'bg-[#A7B8D8]/20 text-[#A7B8D8]'
+                                            }`}>{c.currency}</span>
+                                          </td>
+                                          <td className="py-1.5 text-center font-semibold">{CURRENCY_SYMBOL[c.currency]}{c.denomination}</td>
+                                          <td className="py-1.5 text-center">{c.quantity.toLocaleString('tr-TR')}</td>
+                                          <td className="py-1.5 text-right font-bold">{CURRENCY_SYMBOL[c.currency]}{(c.denomination * c.quantity).toLocaleString('tr-TR')}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                    <tfoot>
+                                      <tr className="border-t border-[#2B416B] bg-[#0E2142]/40">
+                                        <td colSpan={3} className="py-1.5 text-[#A7B8D8] font-semibold text-xs">Toplam</td>
+                                        <td className="py-1.5 text-center text-white font-semibold">{cassettes.reduce((s: number, c: any) => s + c.quantity, 0)}</td>
+                                        <td className="py-1.5 text-right">
+                                          {atmTRY > 0 && <div className="font-bold text-white">₺{atmTRY.toLocaleString('tr-TR')}</div>}
+                                          {atmUSD > 0 && <div className="font-bold text-[#2E86FF]">${atmUSD.toLocaleString('tr-TR')}</div>}
+                                          {atmEUR > 0 && <div className="font-bold text-[#A7B8D8]">€{atmEUR.toLocaleString('tr-TR')}</div>}
+                                          {(atmUSD > 0 || atmEUR > 0) && (
+                                            <div className="text-[10px] text-white/40 mt-0.5">≈ ₺{atmTRYEquiv.toLocaleString('tr-TR')}</div>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    </tfoot>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
-                  ))}
+                  );})}
 
                   {/* Show more/less button */}
                   {selectedRoute.atms.length > 5 && (
@@ -3973,27 +5126,72 @@ export default function CashFlowOpsPage() {
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-[#2B416B] bg-[#0A1628]">
             <div className="flex items-center gap-3">
-              <h2 className="text-xl font-bold text-white">🗺️ Low Cash ATM Heat Map - Tam Ekran</h2>
+              <h2 className="text-xl font-bold text-white">
+                {heatMapView === "low_cash" ? "🔴 Düşük Nakit ATM Isı Haritası - Tam Ekran" : "🟢 Yüksek Nakit ATM Isı Haritası - Tam Ekran"}
+              </h2>
               <div className="text-sm text-[#A7B8D8]">
-                {lowCashAtms.length} ATM
+                {heatMapView === "low_cash" ? lowCashAtms.length : highCashAtms.length} ATM
               </div>
             </div>
             
             <div className="flex items-center gap-4">
+              {/* View Toggle */}
+              <div className="flex items-center gap-1 bg-[#0E2142] rounded-lg p-1">
+                <button
+                  onClick={() => setHeatMapView("low_cash")}
+                  className={`px-3 py-1.5 rounded text-sm font-semibold transition ${
+                    heatMapView === "low_cash"
+                      ? "bg-[#EF4444] text-white"
+                      : "bg-transparent text-[#A7B8D8] hover:text-white"
+                  }`}
+                >
+                  🔴 İkmal
+                </button>
+                <button
+                  onClick={() => setHeatMapView("high_cash")}
+                  className={`px-3 py-1.5 rounded text-sm font-semibold transition ${
+                    heatMapView === "high_cash"
+                      ? "bg-[#10B981] text-white"
+                      : "bg-transparent text-[#A7B8D8] hover:text-white"
+                  }`}
+                >
+                  🟢 Para Toplama
+                </button>
+              </div>
+
               {/* Legend */}
               <div className="flex items-center gap-4 text-sm">
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#E63946]/20">
-                  <span className="inline-block h-3 w-3 rounded-full" style={{ background: "#E63946" }} />
-                  <span className="text-white">Kritik (&lt;20%)</span>
-                </div>
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#F59E0B]/20">
-                  <span className="inline-block h-3 w-3 rounded-full" style={{ background: "#F59E0B" }} />
-                  <span className="text-white">Düşük (20-30%)</span>
-                </div>
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#10B981]/20">
-                  <span className="inline-block h-3 w-3 rounded-full" style={{ background: "#10B981" }} />
-                  <span className="text-white">Normal (&gt;30%)</span>
-                </div>
+                {heatMapView === "low_cash" ? (
+                  <>
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#E63946]/20">
+                      <span className="inline-block h-3 w-3 rounded-full" style={{ background: "#E63946" }} />
+                      <span className="text-white">Kritik (&lt;20%)</span>
+                    </div>
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#F59E0B]/20">
+                      <span className="inline-block h-3 w-3 rounded-full" style={{ background: "#F59E0B" }} />
+                      <span className="text-white">Düşük (20-30%)</span>
+                    </div>
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#10B981]/20">
+                      <span className="inline-block h-3 w-3 rounded-full" style={{ background: "#10B981" }} />
+                      <span className="text-white">Normal (&gt;30%)</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#E63946]/20">
+                      <span className="inline-block h-3 w-3 rounded-full" style={{ background: "#E63946" }} />
+                      <span className="text-white">Kritik (&gt;95%)</span>
+                    </div>
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#F59E0B]/20">
+                      <span className="inline-block h-3 w-3 rounded-full" style={{ background: "#F59E0B" }} />
+                      <span className="text-white">Yüksek (90-95%)</span>
+                    </div>
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#10B981]/20">
+                      <span className="inline-block h-3 w-3 rounded-full" style={{ background: "#10B981" }} />
+                      <span className="text-white">Normal (&lt;90%)</span>
+                    </div>
+                  </>
+                )}
               </div>
               
               <button
@@ -4007,7 +5205,11 @@ export default function CashFlowOpsPage() {
           
           {/* Map - Full Height with proper key to force re-render */}
           <div className="flex-1 w-full" style={{ height: 'calc(100vh - 73px)' }}>
-            <HeatMapComponent key="fullscreen-heatmap" lowCashAtms={lowCashAtms} />
+            <HeatMapComponent 
+              key={`fullscreen-${heatMapView}`} 
+              lowCashAtms={heatMapView === "low_cash" ? lowCashAtms : highCashAtms}
+              isHighCash={heatMapView === "high_cash"}
+            />
           </div>
         </div>
       )}
@@ -4208,55 +5410,114 @@ function CITPatternAnalysis() {
 // Planlı vs Plansız İkmal & Para Toplama Trend Chart Component (Collapsible)
 function PlannedUnplannedCashOperationsChart() {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [dateStart, setDateStart] = useState('2025-01-01');
-  const [dateEnd, setDateEnd] = useState('2025-12-31');
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const [dateStart, setDateStart] = useState(currentMonth);
+  const [dateEnd, setDateEnd] = useState(currentMonth);
   const [selectedTab, setSelectedTab] = useState<'ikmal' | 'toplama'>('ikmal');
 
-  // Mock data - Son 12 ay için planlı/plansız ikmal ve para toplama sayıları
-  const operationsData = [
-    { month: 'Oca 2025', plannedRepl: 42, unplannedRepl: 18, plannedColl: 35, unplannedColl: 12 },
-    { month: 'Şub 2025', plannedRepl: 48, unplannedRepl: 22, plannedColl: 38, unplannedColl: 15 },
-    { month: 'Mar 2025', plannedRepl: 45, unplannedRepl: 15, plannedColl: 40, unplannedColl: 10 },
-    { month: 'Nis 2025', plannedRepl: 52, unplannedRepl: 28, plannedColl: 42, unplannedColl: 18 },
-    { month: 'May 2025', plannedRepl: 50, unplannedRepl: 20, plannedColl: 44, unplannedColl: 14 },
-    { month: 'Haz 2025', plannedRepl: 38, unplannedRepl: 32, plannedColl: 36, unplannedColl: 22 },
-    { month: 'Tem 2025', plannedRepl: 55, unplannedRepl: 25, plannedColl: 48, unplannedColl: 16 },
-    { month: 'Ağu 2025', plannedRepl: 58, unplannedRepl: 18, plannedColl: 50, unplannedColl: 12 },
-    { month: 'Eyl 2025', plannedRepl: 46, unplannedRepl: 24, plannedColl: 41, unplannedColl: 17 },
-    { month: 'Eki 2025', plannedRepl: 43, unplannedRepl: 30, plannedColl: 38, unplannedColl: 20 },
-    { month: 'Kas 2025', plannedRepl: 60, unplannedRepl: 35, plannedColl: 52, unplannedColl: 25 },
-    { month: 'Ara 2025', plannedRepl: 62, unplannedRepl: 22, plannedColl: 55, unplannedColl: 14 },
-  ];
+  // Mock data - gerçek uygulamada API'den gelecek
+  const allMonthsData: Record<string, { plannedRepl: number; unplannedRepl: number; plannedColl: number; unplannedColl: number }> = {
+    '2025-12': { plannedRepl: 62, unplannedRepl: 22, plannedColl: 55, unplannedColl: 14 },
+    '2026-01': { plannedRepl: 58, unplannedRepl: 25, plannedColl: 52, unplannedColl: 18 },
+    '2026-02': { plannedRepl: 64, unplannedRepl: 20, plannedColl: 58, unplannedColl: 12 },
+  };
 
-  const maxValueRepl = Math.max(...operationsData.map(d => Math.max(d.plannedRepl, d.unplannedRepl)));
-  const maxValueColl = Math.max(...operationsData.map(d => Math.max(d.plannedColl, d.unplannedColl)));
-  const totalPlannedRepl = operationsData.reduce((sum, d) => sum + d.plannedRepl, 0);
-  const totalUnplannedRepl = operationsData.reduce((sum, d) => sum + d.unplannedRepl, 0);
-  const totalPlannedColl = operationsData.reduce((sum, d) => sum + d.plannedColl, 0);
-  const totalUnplannedColl = operationsData.reduce((sum, d) => sum + d.unplannedColl, 0);
+  // Seçilen tarih aralığındaki veriyi hesapla
+  const calculateRangeData = () => {
+    const start = new Date(dateStart);
+    const end = new Date(dateEnd);
+    let totalPlannedRepl = 0;
+    let totalUnplannedRepl = 0;
+    let totalPlannedColl = 0;
+    let totalUnplannedColl = 0;
+    
+    for (let d = new Date(start); d <= end; d.setMonth(d.getMonth() + 1)) {
+      const monthKey = d.toISOString().slice(0, 7);
+      const monthData = allMonthsData[monthKey];
+      if (monthData) {
+        totalPlannedRepl += monthData.plannedRepl;
+        totalUnplannedRepl += monthData.unplannedRepl;
+        totalPlannedColl += monthData.plannedColl;
+        totalUnplannedColl += monthData.unplannedColl;
+      }
+    }
+    return { totalPlannedRepl, totalUnplannedRepl, totalPlannedColl, totalUnplannedColl };
+  };
+
+  const { totalPlannedRepl, totalUnplannedRepl, totalPlannedColl, totalUnplannedColl } = calculateRangeData();
+
+  // Önceki dönem hesaplama
+  const calculatePreviousPeriod = () => {
+    const start = new Date(dateStart);
+    const end = new Date(dateEnd);
+    const diffMonths = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+    
+    const prevEnd = new Date(start);
+    prevEnd.setDate(0);
+    const prevStart = new Date(prevEnd);
+    prevStart.setMonth(prevStart.getMonth() - diffMonths);
+    
+    let prevPlannedRepl = 0;
+    let prevUnplannedRepl = 0;
+    let prevPlannedColl = 0;
+    let prevUnplannedColl = 0;
+    
+    for (let d = new Date(prevStart); d <= prevEnd; d.setMonth(d.getMonth() + 1)) {
+      const monthKey = d.toISOString().slice(0, 7);
+      const monthData = allMonthsData[monthKey];
+      if (monthData) {
+        prevPlannedRepl += monthData.plannedRepl;
+        prevUnplannedRepl += monthData.unplannedRepl;
+        prevPlannedColl += monthData.plannedColl;
+        prevUnplannedColl += monthData.unplannedColl;
+      }
+    }
+    return { prevPlannedRepl, prevUnplannedRepl, prevPlannedColl, prevUnplannedColl };
+  };
+
+  const { prevPlannedRepl, prevUnplannedRepl, prevPlannedColl, prevUnplannedColl } = calculatePreviousPeriod();
+  
+  // Trend hesaplamaları
+  const plannedReplTrend = prevPlannedRepl > 0 ? ((totalPlannedRepl - prevPlannedRepl) / prevPlannedRepl * 100).toFixed(1) : 0;
+  const unplannedReplTrend = prevUnplannedRepl > 0 ? ((totalUnplannedRepl - prevUnplannedRepl) / prevUnplannedRepl * 100).toFixed(1) : 0;
+  const plannedCollTrend = prevPlannedColl > 0 ? ((totalPlannedColl - prevPlannedColl) / prevPlannedColl * 100).toFixed(1) : 0;
+  const unplannedCollTrend = prevUnplannedColl > 0 ? ((totalUnplannedColl - prevUnplannedColl) / prevUnplannedColl * 100).toFixed(1) : 0;
+
+  const formatMonthDisplay = () => {
+    const start = new Date(dateStart);
+    const end = new Date(dateEnd);
+    const monthNames = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
+    
+    if (dateStart === dateEnd) {
+      return `${monthNames[start.getMonth()]} ${start.getFullYear()}`;
+    } else {
+      return `${monthNames[start.getMonth()]} ${start.getFullYear()} - ${monthNames[end.getMonth()]} ${end.getFullYear()}`;
+    }
+  };
+
+  const displayPeriod = formatMonthDisplay();
 
   // Excel Export Function
   const exportToExcel = () => {
     const csvContent = '\uFEFFPlanlı vs Plansız İkmal & Para Toplama Trendi\n' +
-      `Tarih Aralığı: ${dateStart} - ${dateEnd}\n\n` +
-      'Ay,Planlı İkmal,Plansız İkmal,Planlı Para Toplama,Plansız Para Toplama\n' +
-      operationsData.map((data) => 
-        `${data.month},${data.plannedRepl},${data.unplannedRepl},${data.plannedColl},${data.unplannedColl}`
-      ).join('\n') +
-      `\n\nTOPLAM,${totalPlannedRepl},${totalUnplannedRepl},${totalPlannedColl},${totalUnplannedColl}\n` +
+      `Dönem: ${displayPeriod}\n\n` +
+      'Metrik,Mevcut Dönem,Önceki Dönem,Değişim (%)\n' +
+      `Planlı İkmal,${totalPlannedRepl},${prevPlannedRepl},${plannedReplTrend}%\n` +
+      `Plansız İkmal,${totalUnplannedRepl},${prevUnplannedRepl},${unplannedReplTrend}%\n` +
+      `Planlı Para Toplama,${totalPlannedColl},${prevPlannedColl},${plannedCollTrend}%\n` +
+      `Plansız Para Toplama,${totalUnplannedColl},${prevUnplannedColl},${unplannedCollTrend}%\n` +
       `\nPlansız İkmal Oranı,%${((totalUnplannedRepl / (totalPlannedRepl + totalUnplannedRepl)) * 100).toFixed(1)}\n` +
       `Plansız Para Toplama Oranı,%${((totalUnplannedColl / (totalPlannedColl + totalUnplannedColl)) * 100).toFixed(1)}`;
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Planned_Unplanned_Cash_Operations_${dateStart}_${dateEnd}.csv`;
+    link.download = `Planned_Unplanned_Cash_Operations_${displayPeriod.replace(/\s/g, '_')}.csv`;
     link.click();
   };
 
   return (
     <div className="bg-[#112544] rounded-2xl p-4 ring-1 ring-[#2B416B] mt-4">
-      {/* Header */}
       <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
         <div 
           className="flex items-center gap-3 cursor-pointer hover:bg-[#1a2f54] rounded-lg p-2 transition-all flex-1"
@@ -4264,56 +5525,49 @@ function PlannedUnplannedCashOperationsChart() {
         >
           <div className="text-2xl">{isExpanded ? '📊' : '📈'}</div>
           <div>
-            <div className="text-sm text-white font-semibold">💰 Planlı vs Plansız Nakit Operasyonları</div>
-            <div className="text-xs text-[#A7B8D8] mt-1">
-              İkmal ve Para Toplama operasyonları karşılaştırması
-            </div>
+            <div className="text-sm text-white font-semibold">💰 Planlı vs Plansız Nakit Operasyonları <span className="text-xs font-normal text-[#A7B8D8]">(Aylık)</span></div>
+            <div className="text-xs text-[#A7B8D8] mt-1">{displayPeriod} dönemi operasyonları</div>
           </div>
-          <div className="text-[#A7B8D8] text-xl transition-transform ml-auto" style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>
-            ▼
-          </div>
+          <div className="text-[#A7B8D8] text-xl transition-transform ml-auto" style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</div>
         </div>
 
-        {/* Stats Preview (Always Visible) */}
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex items-center gap-1">
-            <div className="w-3 h-3 rounded bg-[#10B981]"></div>
-            <span className="text-xs text-[#A7B8D8]">İkmal: {totalPlannedRepl + totalUnplannedRepl}</span>
+        <div className="flex items-center gap-3">
+          <div className="flex flex-col items-center">
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 rounded bg-[#10B981]"></div>
+              <span className="text-xs text-[#A7B8D8]">İkmal: {totalPlannedRepl + totalUnplannedRepl}</span>
+            </div>
+            <div className={`text-xs font-semibold mt-0.5 ${Number(unplannedReplTrend) >= 0 ? 'text-red-400' : 'text-green-400'}`}>
+              {Number(unplannedReplTrend) >= 0 ? '↗' : '↘'} {Math.abs(Number(unplannedReplTrend))}%
+            </div>
           </div>
-          <div className="flex items-center gap-1">
-            <div className="w-3 h-3 rounded bg-[#F59E0B]"></div>
-            <span className="text-xs text-[#A7B8D8]">Toplama: {totalPlannedColl + totalUnplannedColl}</span>
+          <div className="flex flex-col items-center">
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 rounded bg-[#F59E0B]"></div>
+              <span className="text-xs text-[#A7B8D8]">Toplama: {totalPlannedColl + totalUnplannedColl}</span>
+            </div>
+            <div className={`text-xs font-semibold mt-0.5 ${Number(unplannedCollTrend) >= 0 ? 'text-red-400' : 'text-green-400'}`}>
+              {Number(unplannedCollTrend) >= 0 ? '↗' : '↘'} {Math.abs(Number(unplannedCollTrend))}%
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Date Range and Export Filters - Show when expanded */}
       {isExpanded && (
         <div className="flex items-center gap-2 flex-wrap mb-3 px-2">
-          {/* Tab Selection */}
           <div className="flex items-center gap-1 mr-3">
             <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setSelectedTab('ikmal');
-              }}
+              onClick={(e) => { e.stopPropagation(); setSelectedTab('ikmal'); }}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                selectedTab === 'ikmal'
-                  ? 'bg-[#10B981] text-white'
-                  : 'bg-[#0E2142] text-[#A7B8D8] hover:bg-[#1a2f54]'
+                selectedTab === 'ikmal' ? 'bg-[#10B981] text-white' : 'bg-[#0E2142] text-[#A7B8D8] hover:bg-[#1a2f54]'
               }`}
             >
               📦 İkmal
             </button>
             <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setSelectedTab('toplama');
-              }}
+              onClick={(e) => { e.stopPropagation(); setSelectedTab('toplama'); }}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                selectedTab === 'toplama'
-                  ? 'bg-[#F59E0B] text-white'
-                  : 'bg-[#0E2142] text-[#A7B8D8] hover:bg-[#1a2f54]'
+                selectedTab === 'toplama' ? 'bg-[#F59E0B] text-white' : 'bg-[#0E2142] text-[#A7B8D8] hover:bg-[#1a2f54]'
               }`}
             >
               💵 Para Toplama
@@ -4335,16 +5589,13 @@ function PlannedUnplannedCashOperationsChart() {
               value={dateEnd}
               onChange={(e) => setDateEnd(e.target.value)}
               min={dateStart}
-              max="2026-02-12"
+              max="2026-02-18"
               className="px-2 py-1 text-xs rounded-lg bg-[#0E2142] text-white border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#2E86FF]"
               onClick={(e) => e.stopPropagation()}
             />
           </div>
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              exportToExcel();
-            }}
+            onClick={(e) => { e.stopPropagation(); exportToExcel(); }}
             className="px-3 py-1.5 rounded-lg bg-[#10B981]/20 text-[#10B981] hover:bg-[#10B981]/30 text-xs font-semibold transition-all flex items-center gap-1"
           >
             📥 Excel Export
@@ -4352,136 +5603,189 @@ function PlannedUnplannedCashOperationsChart() {
         </div>
       )}
 
-      {/* Expandable Chart Content */}
       {isExpanded && (
         <div className="mt-4">
-          {/* Single Chart - İkmal or Para Toplama based on selectedTab */}
-          <div className="bg-[#0E2142]/40 rounded-xl p-4">
-            <div className="text-sm font-semibold text-white mb-3">
-              {selectedTab === 'ikmal' ? '📦 İkmal Operasyonları' : '💵 Para Toplama Operasyonları'}
-            </div>
-            <div className="flex gap-2">
-              {operationsData.map((data, idx) => {
-                const maxValue = selectedTab === 'ikmal' ? maxValueRepl : maxValueColl;
-                const plannedValue = selectedTab === 'ikmal' ? data.plannedRepl : data.plannedColl;
-                const unplannedValue = selectedTab === 'ikmal' ? data.unplannedRepl : data.unplannedColl;
-                const plannedColor = selectedTab === 'ikmal' ? { from: '#10B981', to: '#059669' } : { from: '#F59E0B', to: '#F97316' };
-                const unplannedColor = selectedTab === 'ikmal' ? { from: '#EF4444', to: '#DC2626' } : { from: '#8B5CF6', to: '#7C3AED' };
-
-                return (
-                  <div key={idx} className="flex-1 flex flex-col items-center gap-2">
-                    <div className="w-full flex items-end justify-center gap-1" style={{ height: '180px' }}>
-                      {/* Planned Bar */}
-                      <div className="relative flex flex-col items-center justify-end flex-1 group">
-                        <div 
-                          className="w-full rounded-t transition-all hover:opacity-80"
-                          style={{ 
-                            height: `${(plannedValue / maxValue) * 100}%`, 
-                            minHeight: '15px',
-                            background: `linear-gradient(to top, ${plannedColor.from}, ${plannedColor.to})`
-                          }}
-                        >
-                          <div className="absolute -top-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <div className="text-white text-[10px] px-2 py-1 rounded whitespace-nowrap font-semibold" style={{ backgroundColor: plannedColor.from }}>
-                              {plannedValue}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      {/* Unplanned Bar */}
-                      <div className="relative flex flex-col items-center justify-end flex-1 group">
-                        <div 
-                          className="w-full rounded-t transition-all hover:opacity-80"
-                          style={{ 
-                            height: `${(unplannedValue / maxValue) * 100}%`, 
-                            minHeight: '15px',
-                            background: `linear-gradient(to top, ${unplannedColor.from}, ${unplannedColor.to})`
-                          }}
-                        >
-                          <div className="absolute -top-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <div className="text-white text-[10px] px-2 py-1 rounded whitespace-nowrap font-semibold" style={{ backgroundColor: unplannedColor.from }}>
-                              {unplannedValue}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            {selectedTab === 'ikmal' ? (
+              <>
+                <div className="bg-[#10B981]/10 rounded-lg p-4 border border-[#10B981]/30">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded bg-[#10B981]"></div>
+                      <span className="text-sm font-semibold text-white">Planlı İkmal</span>
                     </div>
-                    
-                    <div className="text-[10px] text-[#A7B8D8] font-semibold text-center">
-                      {data.month}
+                    <div className="flex flex-col items-end">
+                      <div className={`text-xs font-semibold ${Number(plannedReplTrend) >= 0 ? 'text-red-400' : 'text-green-400'}`}>
+                        {Number(plannedReplTrend) >= 0 ? '↗' : '↘'} {Math.abs(Number(plannedReplTrend))}%
+                      </div>
+                      <div className="text-[10px] text-gray-500">önceki döneme göre</div>
                     </div>
                   </div>
-                );
-              })}
-            </div>
+                  <div className="text-3xl font-bold text-[#10B981]">{totalPlannedRepl}</div>
+                  <div className="text-xs text-[#A7B8D8] mt-1">{displayPeriod}</div>
+                  <div className="text-xs text-gray-400 mt-2">Önceki dönem: {prevPlannedRepl} adet</div>
+                </div>
+                
+                <div className="bg-[#EF4444]/10 rounded-lg p-4 border border-[#EF4444]/30">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded bg-[#EF4444]"></div>
+                      <span className="text-sm font-semibold text-white">Plansız İkmal</span>
+                    </div>
+                    <div className="flex flex-col items-end">
+                      <div className={`text-xs font-semibold ${Number(unplannedReplTrend) >= 0 ? 'text-red-400' : 'text-green-400'}`}>
+                        {Number(unplannedReplTrend) >= 0 ? '↗' : '↘'} {Math.abs(Number(unplannedReplTrend))}%
+                      </div>
+                      <div className="text-[10px] text-gray-500">önceki döneme göre</div>
+                    </div>
+                  </div>
+                  <div className="text-3xl font-bold text-[#EF4444]">{totalUnplannedRepl}</div>
+                  <div className="text-xs text-[#A7B8D8] mt-1">{displayPeriod}</div>
+                  <div className="text-xs text-gray-400 mt-2">Önceki dönem: {prevUnplannedRepl} adet</div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="bg-[#F59E0B]/10 rounded-lg p-4 border border-[#F59E0B]/30">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded bg-[#F59E0B]"></div>
+                      <span className="text-sm font-semibold text-white">Planlı Toplama</span>
+                    </div>
+                    <div className="flex flex-col items-end">
+                      <div className={`text-xs font-semibold ${Number(plannedCollTrend) >= 0 ? 'text-red-400' : 'text-green-400'}`}>
+                        {Number(plannedCollTrend) >= 0 ? '↗' : '↘'} {Math.abs(Number(plannedCollTrend))}%
+                      </div>
+                      <div className="text-[10px] text-gray-500">önceki döneme göre</div>
+                    </div>
+                  </div>
+                  <div className="text-3xl font-bold text-[#F59E0B]">{totalPlannedColl}</div>
+                  <div className="text-xs text-[#A7B8D8] mt-1">{displayPeriod}</div>
+                  <div className="text-xs text-gray-400 mt-2">Önceki dönem: {prevPlannedColl} adet</div>
+                </div>
+                
+                <div className="bg-[#8B5CF6]/10 rounded-lg p-4 border border-[#8B5CF6]/30">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded bg-[#8B5CF6]"></div>
+                      <span className="text-sm font-semibold text-white">Plansız Toplama</span>
+                    </div>
+                    <div className="flex flex-col items-end">
+                      <div className={`text-xs font-semibold ${Number(unplannedCollTrend) >= 0 ? 'text-red-400' : 'text-green-400'}`}>
+                        {Number(unplannedCollTrend) >= 0 ? '↗' : '↘'} {Math.abs(Number(unplannedCollTrend))}%
+                      </div>
+                      <div className="text-[10px] text-gray-500">önceki döneme göre</div>
+                    </div>
+                  </div>
+                  <div className="text-3xl font-bold text-[#8B5CF6]">{totalUnplannedColl}</div>
+                  <div className="text-xs text-[#A7B8D8] mt-1">{displayPeriod}</div>
+                  <div className="text-xs text-gray-400 mt-2">Önceki dönem: {prevUnplannedColl} adet</div>
+                </div>
+              </>
+            )}
+          </div>
 
-            {/* Legend & Stats */}
-            <div className="mt-6 pt-4 border-t border-[#2B416B] grid grid-cols-2 gap-4">
+          <div className="bg-[#0E2142] rounded-xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-xs font-semibold text-white">
+                {selectedTab === 'ikmal' ? '📦 İkmal Karşılaştırma' : '💵 Para Toplama Karşılaştırma'}
+              </div>
+              <div className="text-xs text-[#A7B8D8]">{displayPeriod}</div>
+            </div>
+            <div className="flex items-end justify-center gap-8 h-64">
               {selectedTab === 'ikmal' ? (
                 <>
-                  <div className="bg-[#10B981]/10 rounded-lg p-3 border border-[#10B981]/30">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-3 h-3 rounded bg-[#10B981]"></div>
-                      <span className="text-xs font-semibold text-white">Planlı İkmal</span>
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="relative flex flex-col items-center justify-end group">
+                      <div 
+                        className="w-24 bg-gradient-to-t from-[#10B981] to-[#059669] rounded-t transition-all hover:opacity-80"
+                        style={{ height: `${Math.min((totalPlannedRepl / 100) * 100, 100)}%`, minHeight: '30px' }}
+                      >
+                        <div className="absolute -top-8 left-1/2 -translate-x-1/2">
+                          <div className="bg-[#10B981] text-white text-sm px-3 py-1 rounded font-bold">{totalPlannedRepl}</div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-2xl font-bold text-[#10B981]">{totalPlannedRepl}</div>
-                    <div className="text-xs text-[#A7B8D8] mt-1">Toplam (12 Ay)</div>
+                    <div className="text-xs text-[#A7B8D8] font-semibold">Planlı</div>
                   </div>
                   
-                  <div className="bg-[#EF4444]/10 rounded-lg p-3 border border-[#EF4444]/30">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-3 h-3 rounded bg-[#EF4444]"></div>
-                      <span className="text-xs font-semibold text-white">Plansız İkmal</span>
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="relative flex flex-col items-center justify-end group">
+                      <div 
+                        className="w-24 bg-gradient-to-t from-[#EF4444] to-[#DC2626] rounded-t transition-all hover:opacity-80"
+                        style={{ height: `${Math.min((totalUnplannedRepl / 100) * 100, 100)}%`, minHeight: '30px' }}
+                      >
+                        <div className="absolute -top-8 left-1/2 -translate-x-1/2">
+                          <div className="bg-[#EF4444] text-white text-sm px-3 py-1 rounded font-bold">{totalUnplannedRepl}</div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-2xl font-bold text-[#EF4444]">{totalUnplannedRepl}</div>
-                    <div className="text-xs text-[#A7B8D8] mt-1">Toplam (12 Ay)</div>
+                    <div className="text-xs text-[#A7B8D8] font-semibold">Plansız</div>
                   </div>
                 </>
               ) : (
                 <>
-                  <div className="bg-[#F59E0B]/10 rounded-lg p-3 border border-[#F59E0B]/30">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-3 h-3 rounded bg-[#F59E0B]"></div>
-                      <span className="text-xs font-semibold text-white">Planlı Toplama</span>
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="relative flex flex-col items-center justify-end group">
+                      <div 
+                        className="w-24 bg-gradient-to-t from-[#F59E0B] to-[#F97316] rounded-t transition-all hover:opacity-80"
+                        style={{ height: `${Math.min((totalPlannedColl / 100) * 100, 100)}%`, minHeight: '30px' }}
+                      >
+                        <div className="absolute -top-8 left-1/2 -translate-x-1/2">
+                          <div className="bg-[#F59E0B] text-white text-sm px-3 py-1 rounded font-bold">{totalPlannedColl}</div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-2xl font-bold text-[#F59E0B]">{totalPlannedColl}</div>
-                    <div className="text-xs text-[#A7B8D8] mt-1">Toplam (12 Ay)</div>
+                    <div className="text-xs text-[#A7B8D8] font-semibold">Planlı</div>
                   </div>
                   
-                  <div className="bg-[#8B5CF6]/10 rounded-lg p-3 border border-[#8B5CF6]/30">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-3 h-3 rounded bg-[#8B5CF6]"></div>
-                      <span className="text-xs font-semibold text-white">Plansız Toplama</span>
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="relative flex flex-col items-center justify-end group">
+                      <div 
+                        className="w-24 bg-gradient-to-t from-[#8B5CF6] to-[#7C3AED] rounded-t transition-all hover:opacity-80"
+                        style={{ height: `${Math.min((totalUnplannedColl / 100) * 100, 100)}%`, minHeight: '30px' }}
+                      >
+                        <div className="absolute -top-8 left-1/2 -translate-x-1/2">
+                          <div className="bg-[#8B5CF6] text-white text-sm px-3 py-1 rounded font-bold">{totalUnplannedColl}</div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-2xl font-bold text-[#8B5CF6]">{totalUnplannedColl}</div>
-                    <div className="text-xs text-[#A7B8D8] mt-1">Toplam (12 Ay)</div>
+                    <div className="text-xs text-[#A7B8D8] font-semibold">Plansız</div>
                   </div>
                 </>
               )}
             </div>
           </div>
 
-          {/* AI Insight */}
           <div className="mt-4 bg-purple-500/10 border border-purple-500/30 rounded-xl p-3">
             <div className="flex items-start gap-2">
               <div className="text-xl">🤖</div>
               <div className="flex-1">
-                <div className="text-xs font-semibold text-purple-400 mb-1">AI Recommendation</div>
+                <div className="text-xs font-semibold text-purple-400 mb-1">AI Değerlendirme</div>
                 <div className="text-xs text-[#A7B8D8] leading-relaxed">
                   {selectedTab === 'ikmal' ? (
                     <>
-                      Plansız ikmal oranı <strong className="text-[#EF4444]">%{((totalUnplannedRepl / (totalPlannedRepl + totalUnplannedRepl)) * 100).toFixed(1)}</strong>. 
-                      <strong className="text-white"> İdeal hedef %20'nin altında olmalı.</strong> Özellikle Haziran ve Kasım aylarında 
-                      plansız ikmal sayıları artış gösteriyor. <strong className="text-[#10B981]">AI tahmin modelini optimize ederek</strong> plansız ikmalleri 
-                      %30-40 azaltabilir, CIT maliyetlerini düşürebilirsiniz.
+                      {displayPeriod} döneminde plansız ikmal oranı <strong className="text-[#EF4444]">%{((totalUnplannedRepl / (totalPlannedRepl + totalUnplannedRepl)) * 100).toFixed(1)}</strong>. 
+                      <strong className="text-white"> Hedef %20'nin altında olmalı.</strong>
+                      {Number(unplannedReplTrend) > 0 && (
+                        <strong className="text-red-400"> Önceki döneme göre %{Math.abs(Number(unplannedReplTrend))} artış var. </strong>
+                      )}
+                      {Number(unplannedReplTrend) < 0 && (
+                        <strong className="text-green-400"> Önceki döneme göre %{Math.abs(Number(unplannedReplTrend))} azalma - olumlu trend. </strong>
+                      )}
+                      <strong className="text-[#10B981]"> AI tahmin modelini optimize ederek</strong> plansız ikmalleri azaltabilir, CIT maliyetlerini düşürebilirsiniz.
                     </>
                   ) : (
                     <>
-                      Plansız para toplama oranı <strong className="text-[#8B5CF6]">%{((totalUnplannedColl / (totalPlannedColl + totalUnplannedColl)) * 100).toFixed(1)}</strong>. 
-                      <strong className="text-white"> İdeal hedef %20'nin altında olmalı.</strong> Özellikle Haziran ve Kasım aylarında 
-                      plansız para toplama sayıları artış gösteriyor. <strong className="text-[#F59E0B]">Nakit seviye tahminlerini iyileştirerek</strong> plansız 
-                      toplama operasyonlarını %25-35 azaltabilir, operasyonel verimliliği artırabilirsiniz.
+                      {displayPeriod} döneminde plansız para toplama oranı <strong className="text-[#8B5CF6]">%{((totalUnplannedColl / (totalPlannedColl + totalUnplannedColl)) * 100).toFixed(1)}</strong>. 
+                      <strong className="text-white"> Hedef %20'nin altında olmalı.</strong>
+                      {Number(unplannedCollTrend) > 0 && (
+                        <strong className="text-red-400"> Önceki döneme göre %{Math.abs(Number(unplannedCollTrend))} artış var. </strong>
+                      )}
+                      {Number(unplannedCollTrend) < 0 && (
+                        <strong className="text-green-400"> Önceki döneme göre %{Math.abs(Number(unplannedCollTrend))} azalma - olumlu trend. </strong>
+                      )}
+                      <strong className="text-[#F59E0B]"> Nakit seviye tahminlerini iyileştirerek</strong> plansız toplama operasyonlarını azaltabilir, operasyonel verimliliği artırabilirsiniz.
                     </>
                   )}
                 </div>

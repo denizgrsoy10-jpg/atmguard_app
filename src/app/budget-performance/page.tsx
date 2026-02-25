@@ -170,6 +170,9 @@ export default function BudgetPerformancePage() {
   const [selectedATM, setSelectedATM] = useState<string | null>(null);
   const [allATMs, setAllATMs] = useState<ATMData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [kmTableExpanded, setKmTableExpanded] = useState(false);
+  const [startDate, setStartDate] = useState('2026-01-01');
+  const [endDate, setEndDate] = useState('2026-12-31');
 
   // CSV'den tüm ATM'leri yükle
   React.useEffect(() => {
@@ -274,6 +277,32 @@ export default function BudgetPerformancePage() {
     return { totalAtms, totalMonthly, totalYearly, avgKm };
   }, [allATMs]);
 
+  // Excel Export Fonksiyonu
+  const exportToExcel = () => {
+    // CSV formatında veri hazırla
+    let csv = 'Nakit Merkezi,Zone,ATM ID,ATM Adı,KM,Hizmet Günleri,İkmal (Aylık),FLM (Aylık),SLM (Aylık),Para Toplama (Aylık),Aylık Toplam,Yıllık Toplam\n';
+    
+    cashCenterStats.forEach(centerStat => {
+      const centerATMs = atmsByCashCenter[centerStat.centerName] || [];
+      centerATMs.forEach((atm: ATMData) => {
+        csv += `${centerStat.centerName},${atm.zone},${atm.id},"${atm.name}",${atm.km},${atm.serviceDays},`;
+        csv += `${atm.operations.ikmal.monthly},${atm.operations.flm.monthly},${atm.operations.slm.monthly},${atm.operations.paraToplama.monthly},`;
+        csv += `${atm.totalMonthlyCost.toFixed(2)},${atm.totalYearlyCost.toFixed(2)}\n`;
+      });
+    });
+
+    // Blob oluştur ve indir
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `ATM_Maliyet_Analizi_${startDate}_${endDate}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // Accordion toggle
   const toggleCenter = (centerName: string) => {
     const newExpanded = new Set(expandedCenters);
@@ -342,7 +371,7 @@ Tarih: ${new Date().toLocaleDateString('tr-TR', { weekday: 'long', year: 'numeri
 
 📊 GENEL BAKIŞ
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Yıllık Bütçe (2026):              ₺1.600.000.000 ($36.7M @ 43.59₺/$)
+Yıllık Bütçe (2026):              ₺1.600.000.000 ($36.6M @ 43.72₺/$)
 Gerçekleşen (YTD - Şubat):        ₺251.800.000 ($5.8M)
 YTD Tasarruf:                     ₺14.800.000 (%5.5) 🟡
 Gerçekçi Yıl Sonu Tahmini:        ₺227.200.000 (%14.2) ✓
@@ -436,7 +465,7 @@ Sonraki Güncelleme: ${new Date(Date.now() + 30*24*60*60*1000).toLocaleDateStrin
         <div className="bg-[#112544] rounded-lg p-4">
           <div className="text-xs text-[#A7B8D8] mb-1">Yıllık Bütçe 2026</div>
           <div className="text-2xl font-bold text-white">₺1.25B</div>
-          <div className="text-xs text-[#A7B8D8] mt-1">$28.7M (43.59₺/$)</div>
+          <div className="text-xs text-[#A7B8D8] mt-1">$28.6M (43.72₺/$)</div>
         </div>
         <div className="bg-[#112544] rounded-lg p-4">
           <div className="text-xs text-[#A7B8D8] mb-1">Gerçekleşen (YTD)</div>
@@ -934,17 +963,54 @@ Sonraki Güncelleme: ${new Date(Date.now() + 30*24*60*60*1000).toLocaleDateStrin
       {/* 🚚 KM BAZLI ATM MALİYET ANALİZİ */}
       <div className="bg-gradient-to-br from-[#112544] to-[#1a3a5f] rounded-2xl p-6 ring-2 ring-[#3B82F6]/30 mt-8">
         <div className="flex items-center justify-between mb-6">
-          <div>
-            <div className="text-xl font-bold text-white flex items-center gap-2">
-              <span>🚚</span>
-              <span>KM Bazlı ATM Maliyet Analizi</span>
+          <button
+            onClick={() => setKmTableExpanded(!kmTableExpanded)}
+            className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+          >
+            <span className="text-2xl">{kmTableExpanded ? '▼' : '▶'}</span>
+            <span>🚚</span>
+            <div className="text-left">
+              <div className="text-xl font-bold text-white">
+                KM Bazlı ATM Maliyet Analizi
+              </div>
+              <div className="text-sm text-[#A7B8D8] mt-1">
+                Nakit merkezinden mesafeye göre gerçek operasyon maliyetleri (Toplam {grandTotals.totalAtms} ATM)
+              </div>
             </div>
-            <div className="text-sm text-[#A7B8D8] mt-1">
-              Nakit merkezinden mesafeye göre gerçek operasyon maliyetleri (Toplam {grandTotals.totalAtms} ATM)
+          </button>
+
+          {/* Tarih Aralığı ve Excel Export */}
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 bg-[#0E2142]/60 rounded-lg p-2">
+              <span className="text-xs text-[#A7B8D8]">Başlangıç:</span>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="bg-[#0E2142] text-white text-sm px-2 py-1 rounded border border-[#2B416B] focus:border-[#3B82F6] focus:outline-none"
+              />
             </div>
+            <div className="flex items-center gap-2 bg-[#0E2142]/60 rounded-lg p-2">
+              <span className="text-xs text-[#A7B8D8]">Bitiş:</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="bg-[#0E2142] text-white text-sm px-2 py-1 rounded border border-[#2B416B] focus:border-[#3B82F6] focus:outline-none"
+              />
+            </div>
+            <button
+              onClick={exportToExcel}
+              className="flex items-center gap-2 bg-[#10B981] hover:bg-[#059669] text-white px-4 py-2 rounded-lg transition-colors font-semibold"
+            >
+              <span>📊</span>
+              <span>Excel İndir</span>
+            </button>
           </div>
         </div>
 
+        {kmTableExpanded && (
+          <>
         {loading ? (
           <div className="text-center py-12 text-[#A7B8D8]">
             <div className="text-lg">CSV yükleniyor...</div>
@@ -1178,6 +1244,8 @@ Sonraki Güncelleme: ${new Date(Date.now() + 30*24*60*60*1000).toLocaleDateStrin
               })}
             </div>
           </>
+        )}
+        </>
         )}
       </div>
     </div>

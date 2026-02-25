@@ -1,0 +1,21 @@
+{
+  "version": "2.0.0",
+  "baseline_accuracy": 0.9279279279279279,
+  "baseline_auc": 0.6121359223300971,
+  "baseline_cash_mae": 21.60389249443784,
+  "baseline_deposit_mae": 17.28311462277437,
+  "best_params": {},
+  "training_history": [
+    {
+      "timestamp": "2026-02-22T12:26:51.528817",
+      "accuracy": 0.9279279279279279,
+      "auc": 0.6121359223300971,
+      "recall": 0.025,
+      "f1": 0.047619047619047616,
+      "cash_mae": 21.60389249443784,
+      "deposit_mae": 17.28311462277437
+    }
+  ],
+  "total_predictions": 0,
+  "total_cost_saved": 0.0
+}
