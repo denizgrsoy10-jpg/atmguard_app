@@ -335,6 +335,13 @@ export default function OverviewPage() {
   
   // Tam ekran harita modal
   const [fullscreenMap, setFullscreenMap] = useState(false);
+
+  // ── Express Log Analyzer ──
+  const [vendorLogSimulated, setVendorLogSimulated] = useState(false);
+  const [vendorLogLoading, setVendorLogLoading] = useState(false);
+  const [vendorLogTab, setVendorLogTab] = useState<'all' | 'cashin' | 'dispense' | 'errors'>('all');
+  const [vendorLogPage, setVendorLogPage] = useState(0);
+  const VENDOR_LOG_PAGE_SIZE = 10;
   
   // Top 10 Risky ATMs tarih aralığı
   const [top10StartDate, setTop10StartDate] = useState(() => {
@@ -479,6 +486,90 @@ export default function OverviewPage() {
       }
     });
   };
+
+  // ── BRM Log Demo Data ──
+  const BRM_DEMO_LOG = {
+    atm_id: 'HWBRMSAE410019P1', log_date: '2026-02-23', source_file: 'BRM260223.txt',
+    health_score: 73, cashin_count: 78, dispense_count: 82, error_count: 12,
+    total_cashin_try: 843200, total_dispense_try: 452500, net_flow_try: 390700,
+    total_rejected_notes: 64, peak_hour: 18,
+    transactions: [
+      { ts: '00:28', op: 'cashin',   amount: 600,    notes: { '200': 3 },              rejected: 0, ok: true },
+      { ts: '01:23', op: 'dispense', amount: 2300,   notes: { '100': 1, '200': 11 },   rejected: 0, ok: true },
+      { ts: '01:39', op: 'dispense', amount: 3000,   notes: { '200': 15 },             rejected: 0, ok: true },
+      { ts: '02:34', op: 'cashin',   amount: 2500,   notes: { '100': 1, '200': 12 },   rejected: 0, ok: true },
+      { ts: '02:39', op: 'cashin',   amount: 2000,   notes: { '100': 2, '200': 9 },    rejected: 0, ok: true },
+      { ts: '06:39', op: 'cashin',   amount: 10000,  notes: { '200': 50 },             rejected: 0, ok: true },
+      { ts: '07:00', op: 'dispense', amount: 2000,   notes: { '200': 10 },             rejected: 0, ok: true },
+      { ts: '07:52', op: 'cashin',   amount: 32000,  notes: { '200': 160 },            rejected: 0, ok: true },
+      { ts: '07:54', op: 'cashin',   amount: 12700,  notes: { '100': 14, '200': 57 },  rejected: 3, ok: true },
+      { ts: '08:13', op: 'cashin',   amount: 4800,   notes: { '100': 4, '200': 20 },   rejected: 0, ok: true },
+      { ts: '08:41', op: 'dispense', amount: 5200,   notes: { '100': 2, '200': 24 },   rejected: 0, ok: true },
+      { ts: '09:12', op: 'cashin',   amount: 18600,  notes: { '100': 8, '200': 85 },   rejected: 2, ok: true },
+      { ts: '09:29', op: 'cashin',   amount: 0,      notes: {},                        rejected: 0, ok: false, error: '5F0000D', errorDesc: 'Banknot doğrulama hatası' },
+      { ts: '09:45', op: 'dispense', amount: 8400,   notes: { '100': 4, '200': 38 },   rejected: 0, ok: true },
+      { ts: '10:03', op: 'cashin',   amount: 12200,  notes: { '200': 61 },             rejected: 4, ok: true },
+      { ts: '10:38', op: 'dispense', amount: 9800,   notes: { '100': 4, '200': 44 },   rejected: 0, ok: true },
+      { ts: '11:07', op: 'cashin',   amount: 0,      notes: {},                        rejected: 0, ok: false, error: '5F0000D', errorDesc: 'Banknot doğrulama hatası' },
+      { ts: '11:22', op: 'cashin',   amount: 28400,  notes: { '100': 12, '200': 130 }, rejected: 7, ok: true },
+      { ts: '11:51', op: 'dispense', amount: 7600,   notes: { '200': 38 },             rejected: 0, ok: true },
+      { ts: '13:02', op: 'cashin',   amount: 24600,  notes: { '100': 6, '200': 114 },  rejected: 8, ok: true },
+      { ts: '13:32', op: 'cashin',   amount: 0,      notes: {},                        rejected: 0, ok: false, error: '5678022', errorDesc: 'Shutter/transport sıkışması' },
+      { ts: '13:48', op: 'dispense', amount: 11200,  notes: { '100': 6, '200': 50 },   rejected: 0, ok: true },
+      { ts: '14:02', op: 'dispense', amount: 4000,   notes: { '100': 20 },             rejected: 0, ok: true },
+      { ts: '14:21', op: 'cashin',   amount: 15400,  notes: { '100': 4, '200': 70 },   rejected: 5, ok: true },
+      { ts: '15:14', op: 'cashin',   amount: 21000,  notes: { '200': 105 },            rejected: 6, ok: true },
+      { ts: '15:44', op: 'dispense', amount: 16200,  notes: { '100': 2, '200': 76 },   rejected: 0, ok: true },
+      { ts: '16:08', op: 'cashin',   amount: 18400,  notes: { '100': 2, '200': 85 },   rejected: 3, ok: true },
+      { ts: '16:33', op: 'dispense', amount: 5500,   notes: { '200': 27, '100': 1 },   rejected: 0, ok: true },
+      { ts: '17:14', op: 'cashin',   amount: 0,      notes: {},                        rejected: 0, ok: false, error: '5F00130', errorDesc: 'Banknot doğrulama / sensör hatası' },
+      { ts: '17:31', op: 'cashin',   amount: 34200,  notes: { '100': 11, '200': 156 }, rejected: 9, ok: true },
+      { ts: '17:41', op: 'cashin',   amount: 0,      notes: {},                        rejected: 0, ok: false, error: '5F0000D', errorDesc: 'Banknot doğrulama hatası' },
+      { ts: '17:55', op: 'dispense', amount: 14300,  notes: { '100': 3, '200': 66 },   rejected: 0, ok: true },
+      { ts: '18:12', op: 'cashin',   amount: 41200,  notes: { '100': 6, '200': 193 },  rejected: 11, ok: true },
+      { ts: '18:44', op: 'dispense', amount: 19800,  notes: { '100': 4, '200': 91 },   rejected: 0, ok: true },
+      { ts: '19:10', op: 'cashin',   amount: 14600,  notes: { '200': 73 },             rejected: 3, ok: true },
+      { ts: '19:38', op: 'dispense', amount: 7200,   notes: { '200': 36 },             rejected: 0, ok: true },
+      { ts: '20:04', op: 'cashin',   amount: 52200,  notes: { '100': 11, '200': 240 }, rejected: 5, ok: true },
+      { ts: '20:34', op: 'dispense', amount: 18600,  notes: { '100': 3, '200': 87 },   rejected: 0, ok: true },
+      { ts: '21:08', op: 'cashin',   amount: 39600,  notes: { '100': 1, '200': 196 },  rejected: 1, ok: true },
+      { ts: '21:11', op: 'cashin',   amount: 0,      notes: {},                        rejected: 0, ok: false, error: '564FFF2', errorDesc: 'CashIn End hatası (işlem tamamlanamadı)' },
+      { ts: '21:12', op: 'dispense', amount: 14200,  notes: { '100': 1, '200': 66 },   rejected: 0, ok: true },
+    ] as Array<{ ts: string; op: 'cashin' | 'dispense'; amount: number; notes: Record<string, number>; rejected: number; ok: boolean; error?: string; errorDesc?: string }>,
+    errors: [
+      { time: '09:29', cmd: 'WFS_CMD_CIM_CASH_IN',     code: '5F0000D', desc: 'Banknot doğrulama hatası (uygunsuz/şüpheli banknot)',   severity: 'medium' },
+      { time: '11:07', cmd: 'WFS_CMD_CIM_CASH_IN',     code: '5F0000D', desc: 'Banknot doğrulama hatası (uygunsuz/şüpheli banknot)',   severity: 'medium' },
+      { time: '13:32', cmd: 'WFS_CMD_CIM_CASH_IN_END', code: '5678022', desc: 'Shutter / transport sıkışması (Jam)',                   severity: 'high' },
+      { time: '13:32', cmd: 'WFS_CMD_CIM_RETRACT',     code: '5720000', desc: 'Retract hatası (banknot yutma motoru)',                 severity: 'high' },
+      { time: '14:02', cmd: 'WFS_CMD_CDM_RESET',       code: '5720000', desc: 'Retract hatası (banknot yutma motoru)',                 severity: 'high' },
+      { time: '17:14', cmd: 'WFS_CMD_CIM_CASH_IN',     code: '5F00130', desc: 'Banknot sensör / validasyon hatası',                   severity: 'medium' },
+      { time: '17:41', cmd: 'WFS_CMD_CIM_CASH_IN',     code: '5F0000D', desc: 'Banknot doğrulama hatası (uygunsuz/şüpheli banknot)',   severity: 'medium' },
+      { time: '21:08', cmd: 'WFS_CMD_CIM_CASH_IN_END', code: '5678022', desc: 'Shutter / transport sıkışması (Jam)',                   severity: 'high' },
+      { time: '21:11', cmd: 'WFS_CMD_CIM_CASH_IN_END', code: '564FFF2', desc: 'CashIn End hatası (işlem tamamlanamadı)',               severity: 'critical' },
+      { time: '21:11', cmd: 'WFS_CMD_CIM_RETRACT',     code: '5720000', desc: 'Retract hatası (banknot yutma motoru)',                 severity: 'high' },
+      { time: '21:12', cmd: 'WFS_CMD_CIM_RESET',       code: '5720000', desc: 'Retract hatası (banknot yutma motoru)',                 severity: 'high' },
+    ] as Array<{ time: string; cmd: string; code: string; desc: string; severity: 'critical' | 'high' | 'medium' }>,
+    hourly: [
+      { h: '00', ci: 600,    di: 0 },     { h: '01', ci: 0,     di: 5300 },
+      { h: '02', ci: 4500,   di: 0 },     { h: '06', ci: 10000, di: 0 },
+      { h: '07', ci: 44800,  di: 2000 },  { h: '08', ci: 10200, di: 40900 },
+      { h: '09', ci: 79600,  di: 17000 }, { h: '10', ci: 33200, di: 29200 },
+      { h: '11', ci: 79500,  di: 7600 },  { h: '12', ci: 3000,  di: 18200 },
+      { h: '13', ci: 65800,  di: 49800 }, { h: '14', ci: 33100, di: 15200 },
+      { h: '15', ci: 49000,  di: 82000 }, { h: '16', ci: 57500, di: 5500 },
+      { h: '17', ci: 81500,  di: 14300 }, { h: '18', ci: 78600, di: 103100 },
+      { h: '19', ci: 30000,  di: 7200 },  { h: '20', ci: 123100, di: 41000 },
+      { h: '21', ci: 59200,  di: 14200 },
+    ],
+  };
+
+  const BRM_BRAIN_FAULTS = [
+    { id: 'RETRACT_MOTOR', severity: 'critical' as const, icon: '⚙️', title: 'Retract Motor Arızası',       count: 4, pattern: '4× 5720000 hatası (13:32, 14:02, 21:11, 21:12)', impact: 'Banknot geri alma mekanizması defalarca hata verdi. Mekanik aşınma veya yabancı cisim riski.',                                   action: 'ACİL BAKIM — Motor kontrol + temizlik gerekli',              urgency: 95 },
+    { id: 'SHUTTER_JAM',   severity: 'high'     as const, icon: '🚪', title: 'Shutter / Sıkışma Riski',    count: 2, pattern: '2× 5678022 (13:32 ve 21:08)',                        impact: 'Transport şeridi iki kez sıkıştı. 21:08\'daki olay CashIn End hatasına yol açtı.',                                              action: 'Transport belt + shutter fiziksel inspeksiyonu',             urgency: 78 },
+    { id: 'VALIDATOR',     severity: 'high'     as const, icon: '🔍', title: 'Banknot Okuyucu Bozulma',    count: 4, pattern: '3× 5F0000D + 1× 5F00130 (09:29, 11:07, 17:14, 17:41)', impact: '64 banknot reddedildi (%7.6 red oranı). Sensör kirliliği veya kalibrasyon bozulması.',                                         action: 'Banknot okuyucu temizliği + sensor kalibrasyon kontrolü',    urgency: 72 },
+    { id: 'CASHIN_END',    severity: 'high'     as const, icon: '❌', title: 'İşlem Kesintisi (CashIn)',   count: 1, pattern: '21:11 → 564FFF2 → RETRACT → RESET zinciri',          impact: 'Para yatırma işlemi eksik kapandı. Banknot havada kaldı, retract başarısız, CIM reset gerekti.',                                 action: '21:11 işlemi müşteri kaydıyla mutabık edilmeli',             urgency: 88 },
+    { id: 'CASH_OVERFLOW', severity: 'medium'   as const, icon: '💰', title: 'Nakit Taşma Riski',          count: 0, pattern: 'Net akış: +₺390,700 (CashIn > Dispense)',             impact: 'Gün boyunca ATM\'ye ₺843,200 girdi, ₺452,500 çıktı. Kasetteki nakit kritik seviyede.',                                          action: 'Yarın öncelikli TOPLAMA planlanmalı',                        urgency: 55 },
+  ];
 
   return (
     <div className="space-y-4">
@@ -1288,128 +1379,189 @@ export default function OverviewPage() {
         </div>
 
         {/* Express Log Analyzer - Acil Log Analiz Sistemi */}
-        <div className="bg-gradient-to-r from-[#EF4444]/20 to-[#DC2626]/10 rounded-xl p-5 ring-1 ring-[#EF4444]/50 mb-6">
-          <div className="flex items-center gap-2 mb-4">
-            <span className="text-xl">⚡</span>
-            <div className="flex-1">
-              <div className="text-sm font-semibold text-white flex items-center gap-2">
-                Express Log Analyzer
-                <span className="px-2 py-0.5 rounded-full bg-[#EF4444] text-white text-[10px] font-bold animate-pulse">
-                  FAST
-                </span>
+        <div className={`rounded-xl p-5 ring-1 mb-6 transition-all duration-300 ${vendorLogSimulated ? 'bg-gradient-to-br from-[#0E2142] to-[#0A1628] ring-[#F2B705]/50 shadow-lg shadow-[#F2B705]/10' : 'bg-gradient-to-r from-[#EF4444]/20 to-[#DC2626]/10 ring-[#EF4444]/50'}`}>
+          {/* Header */}
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <span className="text-xl">⚡</span>
+              <div>
+                <div className="text-sm font-semibold text-white flex items-center gap-2">
+                  Express Log Analyzer
+                  <span className="px-2 py-0.5 rounded-full bg-[#EF4444] text-white text-[10px] font-bold">FAST</span>
+                  {vendorLogSimulated && <span className="px-2 py-0.5 rounded-full bg-[#F2B705]/20 text-[#F2B705] text-[10px] font-bold ring-1 ring-[#F2B705]/40 animate-pulse">🧠 ANALİZ TAMAMLANDI</span>}
+                </div>
+                <div className="text-xs text-[#A7B8D8]">Acil Durum: FLM düzeltemedi? Vendor logu yükle, anında AI analizi al, doğru SLM müdahalesi yap</div>
               </div>
-              <div className="text-xs text-[#A7B8D8]">
-                Acil Durum: FLM düzeltemedi? Vendor logu yükle, anında AI analizi al, doğru SLM müdahalesi yap
-              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {!vendorLogSimulated ? (
+                <button
+                  onClick={() => { setVendorLogLoading(true); setTimeout(() => { setVendorLogLoading(false); setVendorLogSimulated(true); }, 2200); }}
+                  className="px-4 py-2 rounded-lg bg-gradient-to-r from-[#EF4444] to-[#DC2626] hover:from-[#DC2626] hover:to-[#EF4444] text-white text-xs font-bold transition-all shadow-lg hover:scale-105 flex items-center gap-2"
+                >
+                  {vendorLogLoading ? (<><span className="animate-spin inline-block">⟳</span> Analiz ediliyor...</>) : (<>📂 Demo Log Yükle</>)}
+                </button>
+              ) : (
+                <button onClick={() => { setVendorLogSimulated(false); setVendorLogTab('all'); setVendorLogPage(0); }} className="px-3 py-1.5 rounded-lg bg-[#1A3050] hover:bg-[#2B416B] text-[#A7B8D8] text-xs transition-all">✕ Temizle</button>
+              )}
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-            {/* Log Upload Section */}
-            <div className="bg-[#112544] rounded-lg p-4 border border-[#2B416B]">
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-xs font-semibold text-white">📤 Vendor Log Yükle</div>
-                <div className="text-[10px] text-[#A7B8D8]">Max 10MB</div>
+          {/* Loading */}
+          {vendorLogLoading && (
+            <div className="flex flex-col items-center justify-center py-10 gap-4">
+              <div className="w-14 h-14 rounded-full bg-[#F2B705]/20 ring-2 ring-[#F2B705]/60 flex items-center justify-center text-3xl animate-spin">🧠</div>
+              <div className="text-center">
+                <div className="text-sm font-bold text-white">AI Beyin BRM Logu İşliyor...</div>
+                <div className="text-xs text-[#A7B8D8] mt-1">HWBRMSAE410019P1 • 2943 satır • arıza örüntüsü analizi</div>
               </div>
-              
-              <div className="border-2 border-dashed border-[#2B416B] hover:border-[#EF4444] rounded-lg p-6 text-center cursor-pointer transition-all group">
-                <input
-                  type="file"
-                  accept=".txt,.log,.csv"
-                  className="hidden"
-                  id="express-log-upload"
-                />
-                <label htmlFor="express-log-upload" className="cursor-pointer">
-                  <div className="text-4xl mb-2 group-hover:scale-110 transition-transform">📁</div>
-                  <div className="text-xs text-white font-semibold mb-1">Log dosyasını sürükle veya tıkla</div>
-                  <div className="text-[10px] text-[#A7B8D8]">Desteklenen: .txt, .log, .csv</div>
-                </label>
-              </div>
-
-              <div className="mt-3 space-y-2">
-                <div className="flex items-center gap-2 text-xs">
-                  <input type="checkbox" className="w-3 h-3" defaultChecked />
-                  <span className="text-[#A7B8D8]">Bantaş/FLM log'u</span>
-                </div>
-                <div className="flex items-center gap-2 text-xs">
-                  <input type="checkbox" className="w-3 h-3" />
-                  <span className="text-[#A7B8D8]">Vendor sistem log'u</span>
-                </div>
-                <div className="flex items-center gap-2 text-xs">
-                  <input type="checkbox" className="w-3 h-3" />
-                  <span className="text-[#A7B8D8]">Hata kod listesi</span>
-                </div>
+              <div className="flex gap-1.5 flex-wrap justify-center">
+                {['BRM formatı okunuyor', 'İşlemler ayrıştırılıyor', 'Hata kodları analiz', 'Arıza tespiti'].map((step, i) => (
+                  <div key={i} className="text-[10px] px-2 py-1 rounded-full bg-[#1A3050] text-[#A7B8D8] animate-pulse" style={{ animationDelay: `${i * 0.3}s` }}>{step}</div>
+                ))}
               </div>
             </div>
+          )}
 
-            {/* Quick Analysis Results */}
-            <div className="bg-[#112544] rounded-lg p-4 border border-[#2B416B]">
-              <div className="text-xs font-semibold text-white mb-3">⚡ Anında AI Analiz Sonucu</div>
-              
-              <div className="bg-[#0E2142] rounded-lg p-3 mb-3">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="w-2 h-2 rounded-full bg-[#EF4444] animate-pulse"></div>
-                  <span className="text-xs font-semibold text-white">Tespit Edilen Sorun</span>
+          {/* Results */}
+          {vendorLogSimulated && !vendorLogLoading && (() => {
+            const filteredTxns = BRM_DEMO_LOG.transactions.filter(t => {
+              if (vendorLogTab === 'cashin') return t.op === 'cashin' && t.ok;
+              if (vendorLogTab === 'dispense') return t.op === 'dispense' && t.ok;
+              if (vendorLogTab === 'errors') return !t.ok;
+              return true;
+            });
+            const pageCount = Math.ceil(filteredTxns.length / VENDOR_LOG_PAGE_SIZE);
+            const pageTxns = filteredTxns.slice(vendorLogPage * VENDOR_LOG_PAGE_SIZE, (vendorLogPage + 1) * VENDOR_LOG_PAGE_SIZE);
+            return (
+              <div className="flex flex-col gap-4">
+                {/* ATM Info Strip */}
+                <div className="flex items-center gap-3 p-3 rounded-xl bg-[#0E2142] ring-1 ring-[#2B416B] flex-wrap">
+                  <div className="text-xl">🏧</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-bold text-white">ATM: {BRM_DEMO_LOG.atm_id}</div>
+                    <div className="text-[11px] text-[#A7B8D8]">Log tarihi: {BRM_DEMO_LOG.log_date} • Kaynak: {BRM_DEMO_LOG.source_file}</div>
+                  </div>
+                  {[{ label: 'Para Yatırma', val: `${BRM_DEMO_LOG.cashin_count} işlem`, color: '#10B981' }, { label: 'Para Çekme', val: `${BRM_DEMO_LOG.dispense_count} işlem`, color: '#F2B705' }, { label: 'Net Akış', val: `+₺${(BRM_DEMO_LOG.net_flow_try/1000).toFixed(0)}K`, color: '#2E86FF' }, { label: 'Hata', val: `${BRM_DEMO_LOG.error_count} olay`, color: '#FF4C4C' }].map(stat => (
+                    <div key={stat.label} className="text-center"><div className="text-xs font-bold" style={{ color: stat.color }}>{stat.val}</div><div className="text-[10px] text-[#A7B8D8]">{stat.label}</div></div>
+                  ))}
+                  <div className="flex flex-col items-center ml-2">
+                    <div className={`text-2xl font-black ${BRM_DEMO_LOG.health_score >= 80 ? 'text-[#10B981]' : BRM_DEMO_LOG.health_score >= 60 ? 'text-[#F2B705]' : 'text-[#FF4C4C]'}`}>{BRM_DEMO_LOG.health_score}</div>
+                    <div className="text-[10px] text-[#A7B8D8]">Sağlık/100</div>
+                  </div>
                 </div>
-                <div className="text-xs text-[#A7B8D8] leading-relaxed">
-                  Log analiz ediliyor... Dosya yüklendiğinde AI 5-10 saniye içinde arızayı tespit edip öneri sunacak.
+                {/* Two-column layout */}
+                <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
+                  {/* Log Table */}
+                  <div className="xl:col-span-3 flex flex-col gap-3">
+                    <div className="text-xs font-bold text-[#A7B8D8] uppercase tracking-wider">📊 İşlem Logu</div>
+                    <div className="flex gap-1 flex-wrap">
+                      {([{ key: 'all', label: `Tümü (${BRM_DEMO_LOG.transactions.length})`, icon: '📋' }, { key: 'cashin', label: `Yatırma (${BRM_DEMO_LOG.cashin_count})`, icon: '💳' }, { key: 'dispense', label: `Çekme (${BRM_DEMO_LOG.dispense_count})`, icon: '💸' }, { key: 'errors', label: `Hatalar (${BRM_DEMO_LOG.error_count})`, icon: '🚨' }] as Array<{ key: typeof vendorLogTab; label: string; icon: string }>).map(tab => (
+                        <button key={tab.key} onClick={() => { setVendorLogTab(tab.key); setVendorLogPage(0); }} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${vendorLogTab === tab.key ? (tab.key === 'errors' ? 'bg-[#FF4C4C]/20 text-[#FF4C4C] ring-1 ring-[#FF4C4C]/40' : 'bg-[#2E86FF]/20 text-[#2E86FF] ring-1 ring-[#2E86FF]/40') : 'bg-[#1A3050] text-[#A7B8D8] hover:bg-[#2B416B]'}`}>{tab.icon} {tab.label}</button>
+                      ))}
+                    </div>
+                    <div className="rounded-xl overflow-hidden ring-1 ring-[#2B416B]">
+                      <table className="w-full text-xs">
+                        <thead><tr className="bg-[#0E2142]">
+                          <th className="px-3 py-2.5 text-left text-[#A7B8D8] font-semibold">Zaman</th>
+                          <th className="px-3 py-2.5 text-left text-[#A7B8D8] font-semibold">İşlem</th>
+                          <th className="px-3 py-2.5 text-right text-[#A7B8D8] font-semibold">Tutar</th>
+                          <th className="px-3 py-2.5 text-center text-[#A7B8D8] font-semibold">100₺</th>
+                          <th className="px-3 py-2.5 text-center text-[#A7B8D8] font-semibold">200₺</th>
+                          <th className="px-3 py-2.5 text-center text-[#A7B8D8] font-semibold">NG</th>
+                          <th className="px-3 py-2.5 text-center text-[#A7B8D8] font-semibold">Durum</th>
+                        </tr></thead>
+                        <tbody>
+                          {pageTxns.map((txn, idx) => (
+                            <tr key={idx} className={`border-t border-[#1A3050] ${!txn.ok ? 'bg-[#FF4C4C]/5' : idx % 2 === 0 ? 'bg-[#0A1628]/30' : ''}`}>
+                              <td className="px-3 py-2.5 font-mono text-[#A7B8D8]">{txn.ts}</td>
+                              <td className="px-3 py-2.5">
+                                {txn.ok ? (<span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${txn.op === 'cashin' ? 'bg-[#10B981]/15 text-[#10B981]' : 'bg-[#F2B705]/15 text-[#F2B705]'}`}>{txn.op === 'cashin' ? '💳 Para Yatırma' : '💸 Para Çekme'}</span>) : (<span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#FF4C4C]/15 text-[#FF4C4C]">🚨 {txn.error}</span>)}
+                              </td>
+                              <td className="px-3 py-2.5 text-right font-bold">
+                                {txn.ok && txn.amount > 0 ? (<span className={txn.op === 'cashin' ? 'text-[#10B981]' : 'text-[#F2B705]'}>₺{txn.amount.toLocaleString('tr-TR')}</span>) : txn.ok ? <span className="text-[#A7B8D8]">—</span> : <span className="text-[#FF4C4C] text-[10px]">{txn.errorDesc}</span>}
+                              </td>
+                              <td className="px-3 py-2.5 text-center text-[#A7B8D8]">{txn.notes['100'] ? <span className="text-white font-semibold">×{txn.notes['100']}</span> : '—'}</td>
+                              <td className="px-3 py-2.5 text-center text-[#A7B8D8]">{txn.notes['200'] ? <span className="text-white font-semibold">×{txn.notes['200']}</span> : '—'}</td>
+                              <td className="px-3 py-2.5 text-center">{txn.rejected > 0 ? <span className="text-[#FF4C4C] font-bold">×{txn.rejected}</span> : <span className="text-[#A7B8D8]">—</span>}</td>
+                              <td className="px-3 py-2.5 text-center">{txn.ok ? <span className="text-[#10B981] text-[10px]">✓ OK</span> : <span className="text-[#FF4C4C] text-[10px] font-bold">✗ HATA</span>}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot><tr className="bg-[#0E2142] border-t border-[#2B416B]">
+                          <td colSpan={2} className="px-3 py-2 text-[#A7B8D8] text-[10px]">{filteredTxns.length} kayıt • Sayfa {vendorLogPage+1}/{Math.max(1,pageCount)}</td>
+                          <td className="px-3 py-2 text-right text-[10px]"><span className="text-[#10B981]">+₺{BRM_DEMO_LOG.total_cashin_try.toLocaleString('tr-TR')}</span>{' / '}<span className="text-[#F2B705]">-₺{BRM_DEMO_LOG.total_dispense_try.toLocaleString('tr-TR')}</span></td>
+                          <td colSpan={4} className="px-3 py-2 text-center text-[10px] text-[#FF4C4C]">{BRM_DEMO_LOG.total_rejected_notes} banknot reddedildi</td>
+                        </tr></tfoot>
+                      </table>
+                    </div>
+                    {pageCount > 1 && (
+                      <div className="flex items-center justify-center gap-2">
+                        <button onClick={() => setVendorLogPage(p => Math.max(0,p-1))} disabled={vendorLogPage===0} className="px-3 py-1.5 rounded-lg bg-[#1A3050] text-[#A7B8D8] text-xs disabled:opacity-40 hover:bg-[#2B416B] transition-all">← Önceki</button>
+                        {Array.from({length:pageCount},(_,i)=>(<button key={i} onClick={()=>setVendorLogPage(i)} className={`w-7 h-7 rounded-lg text-xs font-bold transition-all ${vendorLogPage===i?'bg-[#2E86FF] text-white':'bg-[#1A3050] text-[#A7B8D8] hover:bg-[#2B416B]'}`}>{i+1}</button>))}
+                        <button onClick={() => setVendorLogPage(p => Math.min(pageCount-1,p+1))} disabled={vendorLogPage===pageCount-1} className="px-3 py-1.5 rounded-lg bg-[#1A3050] text-[#A7B8D8] text-xs disabled:opacity-40 hover:bg-[#2B416B] transition-all">Sonraki →</button>
+                      </div>
+                    )}
+                    {/* Saatlik Bar */}
+                    <div><div className="text-[10px] text-[#A7B8D8] mb-2 uppercase tracking-wider font-semibold">Saatlik Hacim</div>
+                      <div className="flex items-end gap-1 h-16 overflow-x-auto pb-1">
+                        {BRM_DEMO_LOG.hourly.map(h => {
+                          const maxVal = Math.max(...BRM_DEMO_LOG.hourly.map(x=>x.ci+x.di));
+                          const total = h.ci+h.di; const height = Math.round((total/maxVal)*56);
+                          const ciH = total>0?Math.round((h.ci/total)*height):0; const diH=height-ciH;
+                          return (<div key={h.h} className="flex flex-col items-center gap-0.5 min-w-[22px]" title={`${h.h}:00`}><div className="flex flex-col justify-end" style={{height:'56px'}}>{ciH>0&&<div className="w-4 rounded-t bg-[#10B981]/70" style={{height:`${ciH}px`}}/>}{diH>0&&<div className={`w-4 ${ciH>0?'':'rounded-t'} rounded-b bg-[#F2B705]/70`} style={{height:`${diH}px`}}/>}</div><div className="text-[8px] text-[#A7B8D8]">{h.h}</div></div>);
+                        })}
+                      </div>
+                      <div className="flex gap-3 mt-1">
+                        <div className="flex items-center gap-1 text-[10px] text-[#A7B8D8]"><div className="w-2.5 h-2.5 rounded-sm bg-[#10B981]/70"/> Para Yatırma</div>
+                        <div className="flex items-center gap-1 text-[10px] text-[#A7B8D8]"><div className="w-2.5 h-2.5 rounded-sm bg-[#F2B705]/70"/> Para Çekme</div>
+                      </div>
+                    </div>
+                  </div>
+                  {/* AI Analysis */}
+                  <div className="xl:col-span-2 flex flex-col gap-3">
+                    <div className="flex items-center gap-2"><div className="w-6 h-6 rounded-full bg-[#F2B705]/20 ring-1 ring-[#F2B705]/60 flex items-center justify-center text-sm animate-pulse">🧠</div><div className="text-xs font-bold text-[#A7B8D8] uppercase tracking-wider">AI Beyin Arıza Analizi</div></div>
+                    <div className="p-3 rounded-xl bg-gradient-to-br from-[#FF4C4C]/10 to-[#FF4C4C]/5 ring-1 ring-[#FF4C4C]/30">
+                      <div className="flex items-center gap-2 mb-1.5"><span className="text-base">⚠️</span><span className="text-xs font-bold text-[#FF4C4C]">ARIZA TESPİTİ — BAKIM GEREKLİ</span></div>
+                      <div className="text-[11px] text-[#A7B8D8] leading-relaxed">Bu ATM 1 gün içinde <strong className="text-white">4 farklı arıza türü</strong> üretti. Retract motor kritik. Müdahale edilmezse <strong className="text-[#FF4C4C]">servis dışı kalma riski</strong> yüksek.</div>
+                      <div className="mt-2 pt-2 border-t border-[#FF4C4C]/20 flex items-center gap-2">
+                        <div className="text-lg font-black text-[#F2B705]">{BRM_DEMO_LOG.health_score}/100</div>
+                        <div className="flex-1"><div className="h-2 bg-[#1A3050] rounded-full overflow-hidden"><div className="h-full rounded-full bg-[#F2B705] transition-all duration-1000" style={{width:`${BRM_DEMO_LOG.health_score}%`}}/></div><div className="text-[10px] text-[#A7B8D8] mt-0.5">ATM Sağlık Skoru</div></div>
+                      </div>
+                    </div>
+                    {BRM_BRAIN_FAULTS.map(fault => {
+                      const colors = { critical:{bg:'from-[#FF4C4C]/15 to-[#FF4C4C]/5',ring:'ring-[#FF4C4C]/40',text:'text-[#FF4C4C]',badge:'bg-[#FF4C4C]/20 text-[#FF4C4C]'}, high:{bg:'from-[#F2B705]/15 to-[#F2B705]/5',ring:'ring-[#F2B705]/40',text:'text-[#F2B705]',badge:'bg-[#F2B705]/20 text-[#F2B705]'}, medium:{bg:'from-[#2E86FF]/15 to-[#2E86FF]/5',ring:'ring-[#2E86FF]/30',text:'text-[#2E86FF]',badge:'bg-[#2E86FF]/20 text-[#2E86FF]'} }[fault.severity];
+                      return (
+                        <div key={fault.id} className={`p-3 rounded-xl bg-gradient-to-br ${colors.bg} ring-1 ${colors.ring}`}>
+                          <div className="flex items-start justify-between gap-2 mb-1.5">
+                            <div className="flex items-center gap-2"><span className="text-base">{fault.icon}</span><div><div className={`text-[11px] font-bold ${colors.text}`}>{fault.title}</div>{fault.count>0&&<div className="text-[9px] text-[#A7B8D8]">{fault.count}× tespit edildi</div>}</div></div>
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${colors.badge} whitespace-nowrap`}>{fault.severity==='critical'?'KRİTİK':fault.severity==='high'?'YÜKSEK':'ORTA'}</span>
+                          </div>
+                          <div className="text-[10px] text-[#A7B8D8] mb-1.5 leading-relaxed">{fault.impact}</div>
+                          <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full" style={{background:fault.severity==='critical'?'#FF4C4C':fault.severity==='high'?'#F2B705':'#2E86FF'}}/><div className={`text-[10px] font-semibold ${colors.text}`}>{fault.action}</div></div>
+                          <div className="mt-1.5 h-1 bg-[#1A3050] rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-1000" style={{width:`${fault.urgency}%`,background:fault.severity==='critical'?'#FF4C4C':fault.severity==='high'?'#F2B705':'#2E86FF'}}/></div>
+                        </div>
+                      );
+                    })}
+                    <div className="p-3 rounded-xl bg-[#0E2142] ring-1 ring-[#2B416B]">
+                      <div className="text-[10px] font-bold text-[#2E86FF] mb-2">🧠 AI KARAR ÖZETİ</div>
+                      {[{icon:'🔴',text:'Retract motor: 3 gün içinde parça değişimi'},{icon:'🟠',text:'Transport belt: fiziksel inspeksiyon + yağlama'},{icon:'🟡',text:'Banknot okuyucu: rutin temizlik (ultrasonik)'},{icon:'🔵',text:'Toplama operasyonu: yarın öncelikli'}].map((item,i)=>(<div key={i} className="flex items-start gap-2 text-[10px] text-[#A7B8D8]"><span>{item.icon}</span><span>{item.text}</span></div>))}
+                      <div className="mt-2 pt-2 border-t border-[#2B416B] text-[10px] text-[#A7B8D8]">Önleyici maliyet: <strong className="text-[#10B981]">₺8,500</strong> vs servis dışı: <strong className="text-[#FF4C4C]">₺45,000+</strong></div>
+                    </div>
+                  </div>
                 </div>
               </div>
+            );
+          })()}
 
-              <div className="bg-[#0E2142] rounded-lg p-3 mb-3">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="text-sm">🔧</div>
-                  <span className="text-xs font-semibold text-white">Önerilen Müdahale</span>
-                </div>
-                <div className="text-xs text-[#10B981]">
-                  • SLM gerekli mi? <strong className="text-white">Evet/Hayır</strong><br/>
-                  • Parça değişimi: <strong className="text-white">-</strong><br/>
-                  • Müdahale süresi: <strong className="text-white">- saat</strong>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between p-2 bg-[#F59E0B]/10 rounded-lg border border-[#F59E0B]/30">
-                <div className="text-[10px] text-[#F59E0B] font-semibold">⏱️ Analiz Süresi</div>
-                <div className="text-xs text-white font-bold">5-10 sn</div>
-              </div>
+          {/* Empty state */}
+          {!vendorLogSimulated && !vendorLogLoading && (
+            <div className="flex flex-col items-center justify-center py-8 gap-3 text-center">
+              <div className="text-4xl opacity-30">📋</div>
+              <div className="text-sm text-[#A7B8D8]">Vendor log analizi için yukarıdaki <strong className="text-white">"Demo Log Yükle"</strong> butonuna basın.</div>
+              <div className="text-xs text-[#A7B8D8]/60">Format: Hyosung / Nautilus BRM log (.txt) • AI Beyin arıza örüntüsü tespit eder</div>
             </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex items-center justify-between bg-[#0E2142] rounded-lg p-3">
-            <div className="text-xs text-[#A7B8D8]">
-              💡 <strong className="text-white">Kullanım Senaryosu:</strong> Bantaş gitti, düzeltemedi → Log al → Buraya yükle → 
-              AI analiz et → Doğru vendor'a SLM ticket aç → Hızlı çözüm
-            </div>
-            <button
-              onClick={() => {
-                alert('⚡ Express Log Analyzer\n\n🔍 AI Analiz Başlıyor...\n\n✅ Log okundu: vendor_error_20260218.log\n📊 Hata Kodu: E4502 - Dispenser Jam\n🎯 Arıza Tipi: Para sıkışması (mechanical)\n\n🔧 ÖNER: SLM Gerekli\n📦 Parça: Dispenser Motor Değişimi\n⏱️ Tahmini Süre: 2-3 saat\n💰 Maliyet: ~850 TRY\n\n🚀 SLM Ticket\'ı Aç?\n\n✓ Vendor: Wincor Nixdorf\n✓ Öncelik: High\n✓ Bölge: İstanbul Anadolu');
-              }}
-              className="px-4 py-2 bg-gradient-to-r from-[#EF4444] to-[#DC2626] hover:from-[#DC2626] hover:to-[#EF4444] text-white text-xs font-bold rounded-lg transition-all shadow-lg hover:shadow-xl flex items-center gap-2 whitespace-nowrap"
-            >
-              ⚡ Hızlı Analiz Başlat
-            </button>
-          </div>
-
-          {/* Stats Row */}
-          <div className="grid grid-cols-4 gap-3 mt-4">
-            <div className="bg-[#0E2142]/60 rounded-lg p-2 text-center">
-              <div className="text-xs text-[#A7B8D8] mb-1">Bugün Analiz</div>
-              <div className="text-lg font-bold text-[#EF4444]">12</div>
-            </div>
-            <div className="bg-[#0E2142]/60 rounded-lg p-2 text-center">
-              <div className="text-xs text-[#A7B8D8] mb-1">Ort. Süre</div>
-              <div className="text-lg font-bold text-[#10B981]">7 sn</div>
-            </div>
-            <div className="bg-[#0E2142]/60 rounded-lg p-2 text-center">
-              <div className="text-xs text-[#A7B8D8] mb-1">Doğruluk</div>
-              <div className="text-lg font-bold text-[#2E86FF]">94%</div>
-            </div>
-            <div className="bg-[#0E2142]/60 rounded-lg p-2 text-center">
-              <div className="text-xs text-[#A7B8D8] mb-1">Tasarruf</div>
-              <div className="text-lg font-bold text-[#F59E0B]">3.2h</div>
-            </div>
-          </div>
+          )}
         </div>
 
         {/* Arıza Tahminleme Performansı */}
