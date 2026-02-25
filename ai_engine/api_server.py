@@ -413,16 +413,13 @@ def brm_log_analiz(req: BrmLogAnalizRequest):
                 "sure_dk":     max(0, int((datetime.now() - datetime.fromisoformat(ts)).total_seconds() / 60)) if ts else 0,
                 "vendor_log":  f"{e.get('command', '')} [{hex_code}]",
             })
-        brain.ingest_ariza_feed(ariza_feed)
-        logger.info(f"[BRM LOG ANALİZ] {len(ariza_feed)} hata beyne beslendi → ATM: {req.atm_id}")
-
-        # ── 3) Kalıcı öğrenme — her log beynin uzun süreli hafızasına işlenir ──
-        # Bu ATM'yi önce tanım kaydına ekle (yoksa öğrenme profili oluşturulamaz)
+        # ATM ilk kez görülüyorsa tanım kaydı oluştur — beyin öğrenme profili başlatır
         if req.atm_id not in brain._terminal_tanim:
             brain.ingest_terminal_tanim([{"terminal_id": req.atm_id}])
-        ogrenme_sonuc = brain.ingest_gecmis_ariza(ariza_feed)
-        ogrenme_sayisi = ogrenme_sonuc.get("ogrenme_detay", {}).get(req.atm_id, {}).get("toplam_ariza", 0)
-        logger.info(f"[BRM ÖĞRENME] ATM {req.atm_id}: {ogrenme_sayisi} arıza kaydı hafızaya işlendi")
+
+        brain.ingest_ariza_feed(ariza_feed)
+        ogrenme_sayisi = len(ariza_feed)
+        logger.info(f"[BRM LOG ANALİZ] {ogrenme_sayisi} arıza beyne beslendi → ATM: {req.atm_id}")
     else:
         ogrenme_sayisi = 0
 
