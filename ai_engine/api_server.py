@@ -416,25 +416,54 @@ def brm_log_analiz(req: BrmLogAnalizRequest):
         brain.ingest_ariza_feed(ariza_feed)
         logger.info(f"[BRM LOG ANALİZ] {len(ariza_feed)} hata beyne beslendi → ATM: {req.atm_id}")
 
-    # ── 2) Karar döngüsünü sadece bu ATM için çalıştır ───────────────────────
+        # ── 3) Kalıcı öğrenme — her log beynin uzun süreli hafızasına işlenir ──
+        # Bu ATM'yi önce tanım kaydına ekle (yoksa öğrenme profili oluşturulamaz)
+        if req.atm_id not in brain._terminal_tanim:
+            brain.ingest_terminal_tanim([{"terminal_id": req.atm_id}])
+        ogrenme_sonuc = brain.ingest_gecmis_ariza(ariza_feed)
+        ogrenme_sayisi = ogrenme_sonuc.get("ogrenme_detay", {}).get(req.atm_id, {}).get("toplam_ariza", 0)
+        logger.info(f"[BRM ÖĞRENME] ATM {req.atm_id}: {ogrenme_sayisi} arıza kaydı hafızaya işlendi")
+    else:
+        ogrenme_sayisi = 0
+
+    # ── 4) Müdahale bölgelerini topla (benzersiz, parser'dan gelen module alanı) ──
+    affected_modules: list = []
+    if req.errors:
+        seen_modules: set = set()
+        for e in req.errors:
+            m = str(e.get("module", "")).strip()
+            if m and m not in seen_modules:
+                seen_modules.add(m)
+                affected_modules.append(m)
+
+    # ── 5) Geçmiş risk skoru (öğrenme sonrası güncellenmiş) ─────────────────
+    tanim = brain._terminal_tanim.get(req.atm_id)
+    gecmis_risk_skoru = float(tanim.__dict__.get("gecmis_risk_skoru") or 0.0) if tanim else 0.0
+
+    # ── 6) Karar döngüsünü sadece bu ATM için çalıştır ───────────────────────
     kararlar = brain.run_full_decision_cycle(atm_listesi=[req.atm_id])
 
     if not kararlar:
         return {
-            "terminal_id":      req.atm_id,
-            "eylem":            "IZLE",
-            "aciliyet":         "DUSUK",
-            "mesaj":            "Kritik arıza tespit edilmedi — rutin izleme yeterli",
-            "sebepler":         [],
-            "ariza_riski":      0.0,
-            "nakit_sure_saat":  999.0,
-            "atanan_takim":     "—",
-            "kombine_isler":    [],
-            "tahmini_maliyet":  0.0,
-            "tahmini_tasarruf": 0.0,
+            "terminal_id":        req.atm_id,
+            "eylem":              "IZLE",
+            "aciliyet":           "DUSUK",
+            "mesaj":              "Kritik arıza tespit edilmedi — rutin izleme yeterli",
+            "sebepler":           [],
+            "ariza_riski":        0.0,
+            "nakit_sure_saat":    999.0,
+            "atanan_takim":       "—",
+            "kombine_isler":      [],
+            "affected_modules":   affected_modules,
+            "ogrenme_sayisi":     ogrenme_sayisi,
+            "gecmis_risk_skoru":  gecmis_risk_skoru,
         }
 
-    return kararlar[0].to_dict()
+    result = kararlar[0].to_dict()
+    result["affected_modules"]  = affected_modules
+    result["ogrenme_sayisi"]    = ogrenme_sayisi
+    result["gecmis_risk_skoru"] = gecmis_risk_skoru
+    return result
 
 
 # ── Karar Endpoint'leri ─────────────────────────────────────────────────────

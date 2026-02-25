@@ -1586,46 +1586,36 @@ export default function OverviewPage() {
                           /* ── GERÇEK BEYİN KARARI ──────────────────────────────── */
                           <>
                             {/* Verdict Card */}
-                            <div className="p-3 rounded-xl ring-1" style={{ background: `${aciliyetColor(bv.aciliyet)}12`, borderColor: `${aciliyetColor(bv.aciliyet)}40` }}>
-                              <div className="flex items-center justify-between gap-2 mb-2">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-base">{aciliyetIcon(bv.aciliyet)}</span>
-                                  <div>
-                                    <div className="text-xs font-black" style={{ color: aciliyetColor(bv.aciliyet) }}>
-                                      {aciliyetLabel(bv.aciliyet)} — {eylemLabel(bv.eylem)}
-                                    </div>
-                                    {bv.atanan_takim && bv.atanan_takim !== '—' && (
-                                      <div className="text-[10px] text-[#A7B8D8]">Atanan: {bv.atanan_takim}</div>
-                                    )}
-                                  </div>
-                                </div>
-                                <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold whitespace-nowrap" style={{ background: `${aciliyetColor(bv.aciliyet)}20`, color: aciliyetColor(bv.aciliyet) }}>
-                                  {aciliyetLabel(bv.aciliyet)}
-                                </span>
+                            <div className="p-4 rounded-xl ring-2" style={{ background: `${aciliyetColor(bv.aciliyet)}10`, borderColor: aciliyetColor(bv.aciliyet) }}>
+                              {/* Aciliyet badge */}
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="text-xl">{aciliyetIcon(bv.aciliyet)}</span>
+                                <span className="text-[11px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full" style={{ background: `${aciliyetColor(bv.aciliyet)}25`, color: aciliyetColor(bv.aciliyet) }}>{aciliyetLabel(bv.aciliyet)}</span>
                               </div>
-
-                              {/* Arıza Riski */}
-                              {typeof bv.ariza_riski === 'number' && (
-                                <div className="mb-2">
-                                  <div className="flex items-center justify-between text-[10px] mb-0.5">
-                                    <span className="text-[#A7B8D8]">Arıza Riski</span>
-                                    <span className="font-black" style={{ color: aciliyetColor(bv.aciliyet) }}>%{Math.round(bv.ariza_riski * 100)}</span>
-                                  </div>
-                                  <div className="h-2 bg-[#1A3050] rounded-full overflow-hidden">
-                                    <div className="h-full rounded-full transition-all duration-1000" style={{ width: `${Math.round(bv.ariza_riski * 100)}%`, background: aciliyetColor(bv.aciliyet) }} />
-                                  </div>
+                              {/* Nihai karar */}
+                              <div className="text-base font-black text-white mb-1 leading-tight">{eylemLabel(bv.eylem)}</div>
+                              {/* Atanan ekip */}
+                              {bv.atanan_takim && bv.atanan_takim !== '—' && (
+                                <div className="flex items-center gap-1.5 text-[11px] mb-3">
+                                  <span className="text-[#A7B8D8]">Atanan Ekip:</span>
+                                  <span className="font-bold" style={{ color: aciliyetColor(bv.aciliyet) }}>{bv.atanan_takim}</span>
                                 </div>
                               )}
-
-                              {/* Sağlık Skoru */}
-                              <div className="flex items-center gap-2 pt-2 border-t" style={{ borderColor: `${aciliyetColor(bv.aciliyet)}20` }}>
-                                <div className={`text-lg font-black ${BRM_DEMO_LOG.health_score>=80?'text-[#10B981]':BRM_DEMO_LOG.health_score>=60?'text-[#F2B705]':'text-[#FF4C4C]'}`}>{BRM_DEMO_LOG.health_score}/100</div>
+                              {/* Sağlık + Geçmiş Risk */}
+                              <div className="flex items-center gap-3 pt-2.5 border-t" style={{ borderColor: `${aciliyetColor(bv.aciliyet)}25` }}>
+                                <div className={`text-xl font-black ${BRM_DEMO_LOG.health_score>=80?'text-[#10B981]':BRM_DEMO_LOG.health_score>=60?'text-[#F2B705]':'text-[#FF4C4C]'}`}>{BRM_DEMO_LOG.health_score}/100</div>
                                 <div className="flex-1">
-                                  <div className="h-1.5 bg-[#1A3050] rounded-full overflow-hidden">
+                                  <div className="h-2 bg-[#1A3050] rounded-full overflow-hidden">
                                     <div className={`h-full rounded-full transition-all duration-1000 ${BRM_DEMO_LOG.health_score>=80?'bg-[#10B981]':BRM_DEMO_LOG.health_score>=60?'bg-[#F2B705]':'bg-[#FF4C4C]'}`} style={{width:`${BRM_DEMO_LOG.health_score}%`}}/>
                                   </div>
-                                  <div className="text-[10px] text-[#A7B8D8] mt-0.5">ATM Sağlık Skoru</div>
+                                  <div className="text-[9px] text-[#A7B8D8] mt-0.5">ATM Sağlık Skoru</div>
                                 </div>
+                                {typeof bv.gecmis_risk_skoru === 'number' && bv.gecmis_risk_skoru > 0 && (
+                                  <div className="text-right shrink-0">
+                                    <div className="text-sm font-black text-[#F2B705]">%{Math.round(bv.gecmis_risk_skoru * 100)}</div>
+                                    <div className="text-[9px] text-[#A7B8D8]">geçmiş risk</div>
+                                  </div>
+                                )}
                               </div>
                             </div>
 
@@ -1659,27 +1649,27 @@ export default function OverviewPage() {
                               </div>
                             )}
 
-                            {/* Maliyet / Tasarruf */}
-                            {(bv.tahmini_maliyet > 0 || bv.tahmini_tasarruf > 0) && (
-                              <div className="flex gap-2">
-                                {bv.tahmini_maliyet > 0 && (
-                                  <div className="flex-1 p-2.5 rounded-xl bg-[#FF4C4C]/10 ring-1 ring-[#FF4C4C]/20 text-center">
-                                    <div className="text-[10px] font-black text-[#FF4C4C]">₺{(bv.tahmini_maliyet).toLocaleString('tr')}</div>
-                                    <div className="text-[9px] text-[#A7B8D8]">Tahmini Maliyet</div>
-                                  </div>
-                                )}
-                                {bv.tahmini_tasarruf > 0 && (
-                                  <div className="flex-1 p-2.5 rounded-xl bg-[#10B981]/10 ring-1 ring-[#10B981]/20 text-center">
-                                    <div className="text-[10px] font-black text-[#10B981]">₺{(bv.tahmini_tasarruf).toLocaleString('tr')}</div>
-                                    <div className="text-[9px] text-[#A7B8D8]">Tahmini Tasarruf</div>
-                                  </div>
-                                )}
+                            {/* Müdahale Bölgeleri */}
+                            {Array.isArray(bv.affected_modules) && bv.affected_modules.length > 0 && (
+                              <div className="p-3 rounded-xl bg-[#8B1874]/10 ring-1 ring-[#8B1874]/40">
+                                <div className="text-[10px] font-bold text-[#E879F9] mb-2.5">🔧 MÜDAHALe BÖLGELERİ — Teknisyen Kontrol Edecek</div>
+                                <div className="flex flex-col gap-2">
+                                  {(bv.affected_modules as string[]).map((m: string, i: number) => (
+                                    <div key={i} className="flex items-center gap-2">
+                                      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: aciliyetColor(bv.aciliyet) }} />
+                                      <span className="text-[11px] text-white font-semibold">{m}</span>
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
                             )}
 
                             {/* Footer */}
-                            <div className="p-2.5 rounded-xl bg-[#0E2142] ring-1 ring-[#2B416B] text-[10px] text-[#A7B8D8]">
-                              Log: <strong className="text-white">{BRM_DEMO_LOG.log_date}</strong> • <strong className="text-[#A7B8D8]">{BRM_DEMO_LOG.source_file}</strong>
+                            <div className="p-2.5 rounded-xl bg-[#0E2142] ring-1 ring-[#2B416B] text-[10px] text-[#A7B8D8] flex items-center justify-between flex-wrap gap-2">
+                              <span>Log: <strong className="text-white">{BRM_DEMO_LOG.log_date}</strong> • {BRM_DEMO_LOG.source_file}</span>
+                              {bv.ogrenme_sayisi > 0 && (
+                                <span className="text-[#10B981] font-semibold">📚 {bv.ogrenme_sayisi} arıza kaydı öğrenildi</span>
+                              )}
                             </div>
                           </>
                         ) : (

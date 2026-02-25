@@ -70,6 +70,17 @@ BRM_SERVICE_TYPE = {
     "567800A": "FLM",   # Double-detect = hizalama/kağıt sorunu, FLM
 }
 
+# Fiziksel müdahale bölgesi — teknisyen ATM içinde neye bakacak?
+BRM_MODULE_MAP = {
+    "5720000": "Retract Ünitesi — Banknot Yutma Motoru",
+    "5F0000D": "Banknot Validator — Optik Okuyucu / UV Sensörü",
+    "5F00130": "Banknot Validator — Kalibrasyon / İkincil Sensör",
+    "5678022": "CIM Transport / Shutter — Sürücü Bandı + Perde Mekanizması",
+    "564FFF2": "CashIn İşlem Modülü — End Transaction Katmanı",
+    "5678000": "CIM Transport — Genel Banknot Aktarma Bandı",
+    "567800A": "Çift Banknot Algılayıcı — Double-Detect Sensörü",
+}
+
 
 # ──────────────────────────────────────────────────────────────
 # 3. YARDIMCI FONKSİYONLAR
@@ -247,6 +258,7 @@ def parse_brm_log(filepath: str) -> dict:
                     "error_code": code,
                     "description": ERROR_DESCRIPTIONS.get(code, f"Bilinmeyen hata kodu: {code}"),
                     "service_type": BRM_SERVICE_TYPE.get(code, "FLM"),
+                    "module": BRM_MODULE_MAP.get(code, f"Bilinmeyen Modül ({code})"),
                 })
 
         i += 1
