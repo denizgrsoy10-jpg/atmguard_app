@@ -729,6 +729,255 @@ python3 process_daily_feedback.py --date 2026-02-10
 
 ---
 
+## ⚖️ ANAYASAL NAKİT YÖNETİM KURALLARI (9 Mart 2026)
+
+> **Bu kurallar değiştirilemez operasyonel kanunlardır. AI kararları bunlara aykırı olamaz.**
+
+---
+
+### 💵 Küpür Politikası
+
+#### Çekim İşlemlerinde Kullanılan Banknotlar
+| Para Birimi | Kabul Edilen Küpürler |
+|-------------|----------------------|
+| TL | 200 TL, 100 TL |
+| USD | 100 USD |
+| EUR | 50 EUR |
+| GBP | 50 GBP |
+
+#### Yatırma İşlemlerinde Kabul Edilen Banknotlar
+| Para Birimi | Durum | Not |
+|-------------|-------|-----|
+| TL | ✅ 200 TL, 100 TL, 50 TL | Standart kabul |
+| USD | ✅ Tüm küpürler | Sahte/kapatılmış değilse |
+| EUR | ✅ Tüm küpürler | Sahte/kapatılmış değilse |
+| GBP | ❌ KAPALI | İstisnasız, yatırma kabul edilmez |
+
+> ⚠️ USD/EUR küpürleri sahte banknot veya benzeri bir durum nedeniyle operasyonel olarak kapatılmışsa sistem bu bilgiyi dikkate almalıdır.
+
+---
+
+### 🏦 Para Toplama Kuralları
+
+```
+1. ATM ASLA TAMAMEN PARASIZ BIRAKILMAZ.
+
+2. 100 TL KÜPÜR TOPLAMA:
+   - Kaset hacminin %50'sine ulaşana kadar 100 TL ATM'de bırakılır.
+   - %50 eşiği aşıldığında 100 TL'ler toplanır.
+   - (100 TL toplama kapasitesi şimdilik %50 olarak belirlenmiştir)
+
+3. 200 TL KÜPÜR TOPLAMA:
+   - 200 TL banknotlar her zaman toplatılır.
+   - Eşik aranmaz, mevcut ise toplanır.
+```
+
+---
+
+### 💱 Dövizli ATM Para Toplama & İkmal Kuralları
+
+```
+TL KASET TAM TOPLAMA DURUMU:
+   - Tüm TL kasetlerin toplanması gerekiyorsa:
+     → Tüm kaset sıfırlama yapılır
+     → Her TL kasete 1 küpür giriş yapılır (bakiye bırakılır)
+
+TL KASET TAM İKMAL DURUMU:
+   - Tüm TL kasetler için ikmal ihtiyacı varsa:
+     → Döviz kasetleri de dahil tüm kaset olarak ikmal yapılır
+
+Kural her iki işlem için de aynıdır (Toplama & İkmal).
+```
+
+---
+
+### 📅 Planlı / Plansız İşlem Kuralı
+
+```
+✅ KURAL: İkmal ve Para Toplama işlemleri PLANLI GÜNLERDE yapılır.
+
+❌ PLANSIZ KAYIT açılabilecek istisnalar:
+   - Acil durum (ATM'nin parası bitmesi)
+   - Arıza nedeniyle müdahale
+   - Maaş ödemeli ATM'lerde para bitmesi
+   - Diğer acil operasyonel gereklilikler
+
+Dışındaki tüm işlemler MUTLAKA planlı gün kaydı ile yapılır.
+```
+
+---
+
+### 🕌 Bayram Dönemi Operasyon Kuralları (Kurban & Ramazan Bayramı)
+
+```
+BAYRAM ÖNCESİ (3-4 gün önce):
+   - Çekim hacmi önemli ölçüde artar (+%40-60 tahmini)
+   - Para toplama MİNİMUM düzeyde yapılır
+   - ATM ASLA parasız bırakılmaz
+   - Toplama yapılacaksa en küçük miktarda tutulur
+
+BAYRAM 1. GÜNÜ SONRASI:
+   - İşlem hacimleri düşer
+   - Normal operasyon kurallarına dönülür
+```
+
+---
+
+### 📈 Politika Faizi Temelli Toplama Limiti
+
+```
+TEMEL MANTIK:
+   ATM'den toplanan nakit → Merkez Bankası'na gönderilir
+   → Günlük faiz geliri elde edilir
+
+KARAR KURALI:
+   Günlük faiz geliri ≥ Toplama işlemi maliyeti  → TOPLA ✅
+   Günlük faiz geliri < Toplama işlemi maliyeti  → BEKLAT ❌ (Ertesi gün tekrar bak)
+
+Bu kural politika faizi ile doğrudan bağlantılıdır.
+Politika faizi değiştiğinde limit otomatik güncellenir.
+```
+
+---
+
+### 🗺️ Zone 2 ve Üzeri ATM Kuralları
+
+```
+Zone 2+ ATM'lerin planlı günleri SINIRLIDIR.
+
+DURUM 1 — Para Sorunu:
+   Bir sonraki planlı güne kadar parası yetmeyecekse
+   → Limit altında bile IKMAL yapılır
+
+DURUM 2 — Kaset Doluluk Sorunu:
+   ATM dolup arızaya düşecekse
+   → Limit altında bile TOPLAMA yapılır
+
+Temel kural: Planlı gün gelmeden sorun çıkacaksa müdahale et.
+```
+
+---
+
+### 🗺️ Rota Optimizasyon Kuralı
+
+```
+Yan yana / yakın bölgede ATM'lere müdahale yapılacaksa:
+
+→ O bölgedeki DİĞER ATM'ler de değerlendirilir
+→ Limit altında olsa bile kayıt açılır
+→ Ertesi gün aynı rotaya tekrar gidilmesinin önüne geçmek için
+
+KARAR: "Hazır gidilmişken" mantığıyla rota optimize edilir.
+       Ertesi gün aynı rotaya gidilmesi önlenecekse kayıt girilir.
+```
+
+---
+
+### 📋 Aylık Mutabakat Sıfırlama Zorunluluğu
+
+```
+KURAL: Tüm offsite ATM'lere AYDA EN AZ 1 KERE tüm kaset sıfırlama ZORUNLUDUR.
+
+UYGULAMA:
+   Sıfırlama tarihi yaklaşan / gelen ATM'ler için:
+   • Para ihtiyacı YOK ise  → Tüm kaset sıfırlama
+   • Para ihtiyacı VAR ise  → Tüm kaset ikmal
+
+⚠️ Bu işlem bakiye olarak müdahale ihtiyacı olmasa bile YAPILIR.
+   Mutabakat birimi için yasal/operasyonel zorunluluktur.
+```
+
+---
+
+### 🧾 Müşteri İtirazı Mutabakat Protokolü
+
+```
+Mutabakat birimi → Frontline üzerinden kayıt açar
+
+SENARYO A — İtiraz tarihinden SONRA sıfırlama yapılmışsa:
+   → Sıfırlama tarih ve saatini mutabakat birimine bildir
+   → Frontline kaydı kapatılır ✅
+
+SENARYO B — İtiraz tarihinden sonra sıfırlama YAPILMAMIŞSA:
+   → Planlı tüm kaset sıfırlama VEYA ikmal kaydı oluştur
+     (ATM işlem hacmine göre karar ver)
+   → Frontline kaydı valör tarihi belirtilerek kapatılır ✅
+```
+
+---
+
+### 🚫 Mükerrer Kayıt Engeli
+
+```
+KURAL: Bir ATM üzerinde AYNI ANDA YALNIZCA 1 AÇIK KAYIT olabilir.
+
+YASAK kombinasyonlar:
+   ❌ İkmali olan ATM'ye ayrıca para toplama kaydı
+   ❌ Para toplaması olan ATM'ye ikmal kaydı
+   ❌ Aynı türden 2 kayıt aynı anda açık
+
+⚠️ MEVCUT İSTİSNA:
+   Dövizli ATM'ler şu an istisnadır.
+   Dövizli ikmalleri teke indirme çalışması devam etmektedir.
+```
+
+---
+
+### 🌍 Döviz İkmal Miktar Politikası
+
+```
+STANDART: Genel olarak 1'er deste konulur.
+
+YÜKSEK TUTARLI İKMAL yapılan lokasyonlar:
+   • Sahil ATM'leri (yaz döneminde)
+   • Tarihi Yarımada & Fatih bölgesi (tüm dönemlerde)
+   • Hava limanları (tüm dönemlerde)
+   • Yüksek çekim yapıldığı bilinen lokasyonlar
+```
+
+---
+
+### 🤖 Otomatik Para Toplama Tetikleyicisi
+
+```
+ÇALIŞMA SAATİ: Gece 23:00 (sistem otomatik çalıştırır)
+
+TETİKLEME KOŞULU:
+   Yatırma oranı >= %80 olan ATM'lerde
+   → Ertesi güne planlı PARA TOPLAMA kaydı otomatik açılır
+
+Manuel müdahale gerektirmez. Sistem tarafından yapılır.
+```
+
+---
+
+### 📦 All-in Kaset Doluluk Kuralı
+
+```
+%90 SINIRI → DOLU KABUL EDİLİR
+   • ATM yatırmaya KAPANIR
+   • Bu seviyeye yaklaşıldığında toplama planlanmalıdır
+
+Planlama eşiği: %85 (toplama hazırlığı başla)
+Kapanma eşiği:  %90 (ATM yatırmaya kapandı)
+```
+
+---
+
+### 🔢 Model Bazlı Kaset Kapasiteleri
+
+| Model | Recycle Kaset (adet) | Cashin Kaset (adet) |
+|-------|---------------------|---------------------|
+| GRG H68N(L) | 2.200 | 1.400 (Standart) / 2.000 (Yeni All-in) |
+| GRG H68V(L) | 2.500 | 2.500 |
+| HITACHI | 3.500 | 3.700 |
+
+> Kapasite = Maksimum banknot adedi. Doluluk oranı hesabında bu değerler kullanılır.
+
+---
+
 **Bu dokümandaki bilgiler ABSOLUTE TRUTH - Her zaman hatırla!**
 
-**Son Güncelleme:** 10 Şubat 2026 (Günlük Feedback Loop eklendi)
+**Son Güncelleme:** 9 Mart 2026 (Anayasal Nakit Yönetim Kuralları eklendi)
+
+

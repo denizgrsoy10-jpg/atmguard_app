@@ -7,6 +7,23 @@
 			"command": "npm run dev",
 			"isBackground": true,
 			"problemMatcher": []
+		},
+		{
+			"label": "Install Dependencies",
+			"type": "shell",
+			"command": "npm install && npm run dev",
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Parse Kaset Kapasiteleri",
+			"type": "shell",
+			"command": "cd ai_engine && python3 _parse_kaset.py"
+		},
+		{
+			"label": "Run Capacity Update Script",
+			"type": "shell",
+			"command": "cd /Users/denizgursoy/Projects/atmguard_app/frontend && python3 add_capacity.py"
 		}
 	]
 }

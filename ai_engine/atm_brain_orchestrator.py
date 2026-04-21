@@ -110,6 +110,183 @@ class BusinessRules:
     # ── Maaş Dönemleri (bu günlerde talepler artar) ──────────────────────────
     MAAS_GUNLERI = [1, 2, 3, 14, 15, 16]  # Ayın 1-3 ve 14-16. günleri
 
+    # ── Bilinen Bayram Tarihleri (YYYY-MM-DD) ─────────────────────────────────
+    # Motorun bayram öncesi tedbir alması için güncel listeyi buraya ekleyin
+    BAYRAM_TARIHLERI = [
+        # 2026 Ramazan Bayramı
+        "2026-03-20", "2026-03-21", "2026-03-22",
+        # 2026 Kurban Bayramı
+        "2026-05-27", "2026-05-28", "2026-05-29", "2026-05-30",
+        # 2027 Ramazan Bayramı (tahmin)
+        "2027-03-10", "2027-03-11", "2027-03-12",
+    ]
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # ── ANAYASAL NAKİT YÖNETİM KURALLARI (9 Mart 2026 — Operasyonel Kanun) ──
+    # ══════════════════════════════════════════════════════════════════════════
+
+    # ── Çekim Küpürleri (ATM'den ÇEKME işlemlerinde kullanılan) ──────────────
+    CEKIM_KUPURLERI_TL  = [200, 100]         # TL çekim küpürleri
+    CEKIM_KUPURLERI_USD = [100]              # USD çekim küpürü
+    CEKIM_KUPURLERI_EUR = [50]               # EUR çekim küpürü
+    CEKIM_KUPURLERI_GBP = [50]              # GBP çekim küpürü
+
+    # ── Yatırma Küpürleri (ATM'ye YATIRMA işlemlerinde kabul edilen) ──────────
+    YATIRMA_KUPURLERI_TL  = [200, 100, 50]  # TL yatırma kabul (sahte kapatılmadıkça)
+    YATIRMA_KUPURLERI_USD = 'TUM_KUPURLER'  # Tüm USD kabul (sahte vs. ile kapatılmadıkça)
+    YATIRMA_KUPURLERI_EUR = 'TUM_KUPURLER'  # Tüm EUR kabul (sahte vs. ile kapatılmadıkça)
+    YATIRMA_KUPURLERI_GBP = 'KAPALI'        # GBP yatırma KAPALI (istisnasız)
+
+    # ── Para Toplama Kuralları ────────────────────────────────────────────────
+    # Kaset hacmi %50'ye ulaşana kadar 100 TL küpürler ATM'de bırakılır
+    # 200 TL küpürler her zaman toplatılır
+    # ATM asla tamamen parasız bırakılmaz
+    TOPLAMA_100TL_KAPASITE_ORANI  = 0.50    # %50 dolana kadar 100 TL bırak
+    TOPLAMA_200TL_HER_ZAMAN       = True    # 200 TL her zaman toplatılır
+    TOPLAMA_ATM_BOSH_BIRAKILMAZ   = True    # ATM asla parasız bırakılmaz
+
+    # ── Dövizli ATM Para Toplama / İkmal Kuralları ────────────────────────────
+    # TL kasetlerinin tamamı toplanacaksa → Tüm kaset sıfırlama, her TL kasete 1 küpür gir
+    # Tüm TL kasetler için ikmal gerekiyorsa → Döviz kasetleri de dahil tüm kaset ikmal
+    DOVIZLI_TL_TAM_TOPLAMA_KURAL = 'TAM_KASET_SIFIRLAMA_HER_TL_KASETE_1_KUPÜR'
+    DOVIZLI_TAM_IKMAL_KURAL      = 'DOVIZ_KASETLER_DAHIL_TUM_KASET_IKMAL'
+
+    # ── Planlı / Plansız Kayıt Kuralları ─────────────────────────────────────
+    # Plansız kayıt yalnızca istisna durumlarda açılır
+    PLANLI_GUN_ZORUNLU  = True
+    PLANSIZ_ISTISNALAR  = ['ACIL', 'ARIZA', 'MAAS_ODEMELI', 'PARA_BITMESI']
+
+    # ── Bayram Dönemi Kuralları (Kurban Bayramı & Ramazan Bayramı) ────────────
+    # Bayramdan 3-4 gün önce çekim hacmi çok artar → Toplama minimum, ATM asla boş olmaz
+    # Bayram 1. gününden sonra işlem hacimleri düşer → Normal operasyona dön
+    BAYRAM_ONCESI_GUN_SAYISI   = 4           # Bayramdan kaç gün önce tedbir alınır
+    BAYRAM_ONCESI_HACIM_ARTISI = 0.50        # Tahmini çekim artış oranı (%50)
+    BAYRAM_ONCESI_TOPLAMA_MOD  = 'MINIMUM'   # Toplama minimum seviyede tut
+    BAYRAM_ONCESI_ATM_BOS_OLMAZ = True       # ATM asla parasız bırakılmaz
+
+    # ── Politika Faizi Temelli Toplama Limiti ─────────────────────────────────
+    # Merkez Bankası'na gönderilen tutardan elde edilen günlük faiz geliri
+    # toplama işleminin bedelini karşılamazsa toplama yapılmaz — ertesi gün tekrar bakılır
+    TOPLAMA_MALIYET_KARSILAMA_ZORUNLU = True
+    MERKEZ_BANKASI_GUNLUK_FAIZ_ORANI  = None  # Runtime'da güncel politika faizinden hesaplanır
+
+    # ── Zone 2 ve Üzeri Özel Kuralları ───────────────────────────────────────
+    # Planlı günler sınırlı → Bir sonraki planlı güne parası yetmeyecekse limit altı bile müdahale et
+    # ATM dolup arızaya düşecekse limit altı bile toplama yap
+    ZONE2_PLUS_LIMIT_ALTINDA_MUDAHALE = True   # Limite bakma, müdahale et
+    ZONE2_PLUS_DOLUP_ARIZA_ONLE       = True   # Dolup arızaya düşmeden önce topla
+
+    # ── Rota Optimizasyon Kuralı ──────────────────────────────────────────────
+    # Yakın/aynı bölgedeki ATM'lere hazır gidilmişken limit altında bile müdahale et
+    # Ertesi gün aynı rotaya tekrar gidilmesinin önüne geçmek için kayıt aç
+    ROTA_OPT_YAKIN_ATM_MUDAHALE    = True  # Yakın ATM'ye limit altı müdahale
+    ROTA_OPT_ERTESI_GUN_TEKRAR_ONLE = True  # Ertesi gün aynı rotaya gitmeyi engelle
+
+    # ── Aylık Mutabakat Sıfırlama Kuralı ─────────────────────────────────────
+    # Tüm offsite ATM'lere ayda en az 1 kere tüm kaset sıfırlama ZORUNLU
+    # Para ihtiyacı yoksa → tüm kaset sıfırlama; para ihtiyacı varsa → tüm kaset ikmal
+    AYLIK_MUTABAKAT_SIFIRLAMA_ZORUNLU = True
+    AYLIK_SIFIRLAMA_PERIYOT_GUN       = 30   # 30 günde bir
+
+    # ── Müşteri İtirazı Mutabakat Kuralı ─────────────────────────────────────
+    # Müşteri itirazı olan tarih/saatten sonra sıfırlama yapılmışsa → valör tarihi ile kapat
+    # Sıfırlama yapılmamışsa → planlı tüm kaset sıfırlama veya ikmal kaydı oluştur
+    MUSTERI_ITIRAZ_SIRALAMA_KURALI = 'VALÖR_TARİHİ_İLE_KAPAT'
+
+    # ── Mükerrer Kayıt Engeli ─────────────────────────────────────────────────
+    # Bir ATM üzerinde yalnızca 1 açık kayıt olabilir (İkmal veya Para Toplama)
+    # Dövizli ATM'ler şimdilik istisna — tek ikmale indirilmesi için çalışma yapılmaktadır
+    MUKERRER_KAYIT_ENGEL        = True
+    DOVIZLI_MUKERRER_ISTISNA    = True   # Dövizli ATM'ler şimdilik istisna
+
+    # ── Döviz İkmal Miktarı Kuralları ─────────────────────────────────────────
+    # Genel: 1 deste | Yüksek çekim lokasyonlar: Yüksek tutarlı
+    DOVIZ_IKMAL_STANDART_DESTE       = 1  # Standart 1 deste
+    DOVIZ_IKMAL_YUKSEK_LOKASYONLAR   = [
+        'SAHİL_YAZ', 'TARİHİ_YARIMADA', 'FATİH',
+        'HAVALİMANI', 'YUKSEK_CEKIM',
+    ]
+
+    # ── Otomatik Para Toplama Tetikleyicisi (FALLBACK — Saat Bağımsız Sisteme Geçildi) ──────
+    # ÖNEMLİ: 23:00 sabit zamanlaması KALDIRILDI. Yerine fill velocity + overflow tahmin sistemi var.
+    # Bu sabit artık yalnızca geriye dönük uyumluluk ve fallback için tutulmaktadır.
+    OTOMATIK_TOPLAMA_SAAT               = 23    # [FALLBACK] eski zaman kilidi — yeni sistem saat bilmez
+    OTOMATIK_TOPLAMA_YATIRMA_ORAN_ESIK  = 0.80  # Anlık oran eşiği (fill velocity yoksa yedek kontrol)
+
+    # ── Tahminsel Fill Velocity Tabanlı Toplama (Saat Bağımsız) ──────────────
+    # Her bakiye feed'inde fill velocity hesaplanır → ATM'nin overflow zamanı tahmin edilir.
+    # "Planlı servis gelmeden taşacak mı?" sorusuna cevap aranır — saate değil, veriye bakılır.
+    FILL_VELOCITY_PENCERE_SAAT      = 4    # Son 4 saatlik yatırma trendi (TL/saat)
+    FILL_VELOCITY_MIN_VERI          = 2    # Tahmin için minimum bakiye snapshot sayısı
+    OVERFLOW_GUVENLIK_TAMPONU_SAAT  = 8    # Overflow tahminene eklenen emniyet tamponu (saat)
+    PLANLISIZ_SERVIS_ARALIK_GUN     = 7    # hizmet_gunleri bilinmiyorsa varsayılan aralık
+    FILL_GECMIS_MAX_KAYIT           = 96   # ATM başına maksimum saklanan snapshot (RAM koruma)
+
+    # ── All-in Kaset Doluluk Eşikleri ─────────────────────────────────────────
+    # %90 → Dolu kabul edilir, ATM yatırmaya kapanır
+    ALLIN_KASET_DOLU_ESIK     = 0.90  # %90 = Dolu → Yatırma kapanır
+    ALLIN_KASET_TOPLAMA_ESIK  = 0.85  # %85 → Toplama planla
+
+    # ── Model Bazlı Kaset Kapasiteleri (Banknot Adedi) ────────────────────────
+    KASET_KAPASITELERI = {
+        'GRG_H68N_L': {
+            'recycle_kaset':          2200,
+            'cashin_kaset_standart':  1400,
+            'cashin_kaset_allin':     2000,   # Yeni All-in Kaset
+        },
+        'GRG_H68V_L': {
+            'recycle_kaset':  2500,
+            'cashin_kaset':   2500,
+        },
+        'HITACHI': {
+            'recycle_kaset':  3500,
+            'cashin_kaset':   3700,
+        },
+    }
+
+    # ── Yardımcı Metodlar ──────────────────────────────────────────────────────
+
+    @classmethod
+    def kaset_kapasitesi_al(cls, model: str, kaset_tipi: str = 'recycle_kaset') -> int:
+        """ATM modeline göre kaset kapasitesi döndür (banknot adedi)."""
+        model_norm = model.upper().replace(' ', '_').replace('(', '_').replace(')', '').replace('-', '_')
+        for key, vals in cls.KASET_KAPASITELERI.items():
+            if key.upper() in model_norm or model_norm in key.upper():
+                return vals.get(kaset_tipi, vals.get('recycle_kaset', 2200))
+        return 2200  # Bilinmeyen model → güvenli varsayılan
+
+    @classmethod
+    def toplama_yapilabilir_mi(
+        cls,
+        toplanacak_tutar: float,
+        toplama_maliyeti: float,
+        politika_faizi_yillik: float,
+    ) -> bool:
+        """
+        Politika faizi temelli toplama kararı.
+        Günlük faiz geliri toplama maliyetini karşılamıyorsa toplama yapma.
+        """
+        if not cls.TOPLAMA_MALIYET_KARSILAMA_ZORUNLU:
+            return True
+        gunluk_faiz_orani  = politika_faizi_yillik / 365.0 / 100.0
+        gunluk_faiz_geliri = toplanacak_tutar * gunluk_faiz_orani
+        return gunluk_faiz_geliri >= toplama_maliyeti
+
+    @classmethod
+    def allin_kaset_dolu_mu(cls, mevcut_banknot: int, kapasite: int) -> bool:
+        """All-in kaset %90 dolmuş mu? Dolu ise ATM yatırmaya kapanır."""
+        return (mevcut_banknot / kapasite) >= cls.ALLIN_KASET_DOLU_ESIK
+
+    @classmethod
+    def otomatik_toplama_acilmali_mi(cls, yatirma_orani: float) -> bool:
+        """Gece 23:00 otomatik toplama kaydı: %80+ yatırma oranında tetiklenir."""
+        return yatirma_orani >= cls.OTOMATIK_TOPLAMA_YATIRMA_ORAN_ESIK
+
+    @classmethod
+    def zone2_limit_altinda_mudahale_et(cls, zone: int, planlı_gun_yeterli: bool) -> bool:
+        """Zone 2+ ATM'lerde planlı gün yetmiyorsa limit altında bile müdahale et."""
+        return cls.ZONE2_PLUS_LIMIT_ALTINDA_MUDAHALE and zone >= 2 and not planlı_gun_yeterli
+
     # ── Kombine Servis Tasarruf Oranları ─────────────────────────────────────
     # CIT zaten gidiyorsa FLM bedava bindirilir
     KOMBINE_FLM_IKMAL_TASARRUF  = MALIYET_FLM_SEYAHAT      # 250 TL
@@ -144,6 +321,23 @@ class BusinessRules:
     def is_maas_donemi(cls, dt: datetime = None) -> bool:
         dt = dt or datetime.now()
         return dt.day in cls.MAAS_GUNLERI
+
+    @classmethod
+    def is_bayram_oncesi(cls, dt: datetime = None) -> tuple:
+        """
+        Bayram öncesi dönemde mi? BAYRAM_ONCESI_GUN_SAYISI gün öncesinden itibaren True.
+        Returns: (bool, str) → (bayram_oncesi_mi, bayram_tarihi_str)
+        """
+        dt = dt or datetime.now()
+        for tarih_str in cls.BAYRAM_TARIHLERI:
+            try:
+                bayram_dt = datetime.strptime(tarih_str, "%Y-%m-%d")
+                fark_gun  = (bayram_dt.date() - dt.date()).days
+                if 0 <= fark_gun <= cls.BAYRAM_ONCESI_GUN_SAYISI:
+                    return True, tarih_str
+            except ValueError:
+                continue
+        return False, ""
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -201,6 +395,7 @@ class TerminalTanim:
     nakit_merkezi: str = ''
     hizmet_gunleri: str = ''     # "Pazartesi,Çarşamba,Cuma"
     atm_modeli: str = ''
+    all_in_capacity: int = 0     # Yatan banknot kaseti kapasitesi (Excel'den; 0 = bilinmiyor)
 
 @dataclass
 class BeyinKarari:
@@ -269,6 +464,11 @@ class ATMBrainOrchestrator:
         # Karar geçmişi (geri bildirim için)
         self._karar_gecmisi  : List[BeyinKarari]          = []
 
+        # Fill velocity geçmişi — tahminsel saat-bağımsız toplama için
+        # Her ingest_bakiye_feed() çağrısında güncellenir.
+        # Yapı: { terminal_id: [(zaman: datetime, yatan_para: float), ...] }
+        self._fill_gecmisi   : Dict[str, list]             = {}
+
         # AI motorları (lazy load — kullanılınca yüklenir)
         self._ariza_motoru   = None
         self._cash_motoru    = None
@@ -314,6 +514,7 @@ class ATMBrainOrchestrator:
                 nakit_merkezi      = str(row.get('nakit_merkezi') or row.get('cash_center') or row.get('Nakit Merkezi', '')),
                 hizmet_gunleri     = str(row.get('hizmet_gunleri') or row.get('planned_service_days') or ''),
                 atm_modeli         = str(row.get('atm_modeli') or row.get('model') or row.get('model ', '')),
+                all_in_capacity    = int(row.get('all_in_capacity') or 0),
             )
         logger.info(f"Terminal tanım yüklendi: {len(self._terminal_tanim)} ATM")
 
@@ -407,6 +608,10 @@ class ATMBrainOrchestrator:
                 yatan_para     = sf(row.get('yatan_para') or row.get('Recycle Kasa 4: ALL-IN')),
             )
 
+            # Fill velocity takibini güncelle — her feed geldiğinde (saat bağımsız tahmin için)
+            snap = self._son_bakiye[tid]
+            self._fill_gecmis_guncelle(tid, snap.zaman, snap.yatan_para)
+
         logger.info(f"Bakiye feed alındı: {len(snapshots)} ATM güncellendi")
 
     def ingest_gunson(self, kayitlar: List[Dict]):
@@ -458,6 +663,183 @@ class ATMBrainOrchestrator:
                 'aciklama': aciklama,
                 'durum': 'ACIK',
             }])
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # AKILLI TAHMİNSEL TOPLAMA — Saat bağımsız, fill velocity bazlı
+    # ──────────────────────────────────────────────────────────────────────────
+    #
+    # Temel felsefe:
+    #   ESKİ yaklaşım: "Saat 23:00 oldu mu? → yatırma oranı %80'i geçmiş mi? → kayıt aç"
+    #   YENİ yaklaşım: "Bu ATM'ye bakiyenin fill hızıyla overflow tahmin edilebilir.
+    #                   Planlı servis ziyaretinden ÖNCE taşacak mı? → ŞIMDI kayıt aç."
+    #
+    # Bu dönüşüm şunu sağlar:
+    #   1) Sabah 08:00'de de, öğleden sonra 14:00'da da, gece 02:00'de de tetiklenir.
+    #   2) Düşük trafikli ATM'leri yanlışlıkla tetiklemez (fill hızı düşükse overflow çok uzakta).
+    #   3) Yüksek trafikli ATM'leri saat beklenmeden yakalar (1 saatte taşacak → hemen harekete geç).
+    #   4) Zone ve hizmet_gunleri bilgisiyle her ATM'nin kendi servis takvimine göre kararlar üretir.
+    # ──────────────────────────────────────────────────────────────────────────
+
+    # Türkçe ve İngilizce gün adları → weekday() değeri (0=Pazartesi, 6=Pazar)
+    _HIZMET_GUNLERI_MAP = {
+        'pazartesi': 0, 'sali': 1, 'salı': 1,
+        'carsamba': 2, 'çarşamba': 2,
+        'persembe': 3, 'perşembe': 3,
+        'cuma': 4, 'cumartesi': 5, 'pazar': 6,
+        'monday': 0, 'tuesday': 1, 'wednesday': 2,
+        'thursday': 3, 'friday': 4, 'saturday': 5, 'sunday': 6,
+    }
+
+    def _fill_gecmis_guncelle(self, tid: str, zaman: datetime, yatan_para: float):
+        """
+        ATM'nin yatırma geçmişine yeni snapshot ekle.
+        Her ingest_bakiye_feed() çağrısında otomatik tetiklenir.
+        yatan_para == 0 ise ekleme yapılmaz (toplama yapıldıktan sonra sıfırlama anlamsız).
+        """
+        if yatan_para <= 0:
+            return
+        if tid not in self._fill_gecmisi:
+            self._fill_gecmisi[tid] = []
+        self._fill_gecmisi[tid].append((zaman, yatan_para))
+        # RAM koruma: max kayıt sayısı aşılırsa en eskiyi sil
+        if len(self._fill_gecmisi[tid]) > BusinessRules.FILL_GECMIS_MAX_KAYIT:
+            self._fill_gecmisi[tid] = self._fill_gecmisi[tid][-BusinessRules.FILL_GECMIS_MAX_KAYIT:]
+
+    def _fill_hizi_hesapla(self, tid: str) -> Optional[float]:
+        """
+        Son FILL_VELOCITY_PENCERE_SAAT saatlik yatırma artış hızını (TL/saat) hesapla.
+
+        Returns:
+            float > 0  → TL/saat yatırma hızı (tahminde kullanılabilir)
+            None       → Yetersiz veri VEYA yatan para azalıyor (toplama yapıldı → geçersiz pencere)
+
+        Akıllı filtre: Snapshot serisi içinde yatan_para AZALDIYSA (toplama gerçekleşti),
+        o nokta bir "sıfırlama" sinyalidir. Sadece son monoton artan bloğu dikkate alır.
+        """
+        gecmis = self._fill_gecmisi.get(tid)
+        if not gecmis or len(gecmis) < BusinessRules.FILL_VELOCITY_MIN_VERI:
+            return None
+
+        simdi   = datetime.now()
+        pencere = simdi - timedelta(hours=BusinessRules.FILL_VELOCITY_PENCERE_SAAT)
+
+        # Penceredeki kayıtları filtrele
+        pencere_verisi = [(t, p) for t, p in gecmis if t >= pencere]
+        if len(pencere_verisi) < BusinessRules.FILL_VELOCITY_MIN_VERI:
+            pencere_verisi = gecmis  # Pencere boşsa tüm geçmişi kullan
+
+        if len(pencere_verisi) < 2:
+            return None
+
+        pencere_verisi = sorted(pencere_verisi, key=lambda x: x[0])
+
+        # Toplama sonrası sıfırlama tespiti: En son azalma noktasını bul
+        # O noktadan sonraki bloğu kullan (en güncel fill trendi)
+        son_sifirlama_idx = 0
+        for i in range(1, len(pencere_verisi)):
+            if pencere_verisi[i][1] < pencere_verisi[i - 1][1] * 0.5:  # %50'den fazla düşüş = toplama
+                son_sifirlama_idx = i  # Bu noktadan itibaren yeni fill trendini izle
+
+        aktif_veri = pencere_verisi[son_sifirlama_idx:]
+        if len(aktif_veri) < 2:
+            return None
+
+        t0, p0 = aktif_veri[0]
+        t1, p1 = aktif_veri[-1]
+        sure_saat = (t1 - t0).total_seconds() / 3600.0
+
+        if sure_saat < 0.05:   # 3 dakikadan az → güvenilmez
+            return None
+
+        artis = p1 - p0
+        if artis <= 0:
+            return None   # Net artış yok → fill trendi yok
+
+        return artis / sure_saat   # TL/saat
+
+    def _sonraki_servis_gun_hesapla(self, tid: str, simdi: datetime) -> float:
+        """
+        Bu ATM'nin hizmet_gunleri alanına göre bir sonraki planlı servis ziyareti
+        kaç gün sonra?
+
+        Örnekler:
+            "Pazartesi,Çarşamba,Cuma" + bugün=Salı  → 1 gün (Çarşamba)
+            "Pazartesi,Perşembe"      + bugün=Cuma   → 3 gün (Pazartesi)
+            "Hergün"                                 → 1 gün
+            Boş / bilinmiyor                         → PLANLISIZ_SERVIS_ARALIK_GUN (7 gün)
+
+        Bu metod, sabit "5 gün" eşiği yerine HER ATM İÇİN kendi takvimine göre
+        doğru ikmal/toplama tetikleme kararı vermesini sağlar.
+        """
+        tanim = self._terminal_tanim.get(tid)
+        if not tanim or not tanim.hizmet_gunleri:
+            return float(BusinessRules.PLANLISIZ_SERVIS_ARALIK_GUN)
+
+        gunler_str = (tanim.hizmet_gunleri or '').lower().strip()
+
+        # "Hergün" / "Everyday" / "Daily" → 1 gün
+        if any(k in gunler_str for k in ('hergün', 'her gün', 'her gun', 'hergun', 'everyday', 'daily')):
+            return 1.0
+
+        # Gün isimlerini parse et
+        hizmet_gunleri: set = set()
+        for gun_adi, gun_no in self._HIZMET_GUNLERI_MAP.items():
+            if gun_adi in gunler_str:
+                hizmet_gunleri.add(gun_no)
+
+        if not hizmet_gunleri:
+            return float(BusinessRules.PLANLISIZ_SERVIS_ARALIK_GUN)
+
+        bugun = simdi.weekday()   # 0=Pazartesi, 6=Pazar
+        for offset in range(1, 8):
+            sonraki = (bugun + offset) % 7
+            if sonraki in hizmet_gunleri:
+                return float(offset)
+
+        return float(BusinessRules.PLANLISIZ_SERVIS_ARALIK_GUN)
+
+    def _overflow_tahmin_et(
+        self,
+        tid: str,
+        bakiye: 'BakiyeSnapshot',
+        atm_modeli: str = '',
+    ) -> Optional[float]:
+        """
+        Mevcut fill velocity ile ATM'nin all-in kaset toplama eşiğine (%85)
+        ulaşması kaç saat alır?
+
+        Returns:
+            0.0   → Zaten eşikte veya üzerinde (hemen topla)
+            float → Kaç saat sonra eşiğe ulaşılır (pozitif değer)
+            None  → Tahmin için yeterli veri yok (fill hızı hesaplanamıyor)
+
+        Kapasite hesabı: ATM modeli biliniyorsa model bazlı kapasite kullanılır,
+        bilinmiyorsa 2200 banknot varsayılan.
+        Küpür ortalaması: Proxy olarak 150 TL/banknot (100+200 TL karışık gerçekçi ort.)
+        """
+        fill_hizi = self._fill_hizi_hesapla(tid)
+        if fill_hizi is None or fill_hizi <= 0:
+            return None
+
+        # Kapasite hesabı — önce ATM'ye özgün değer (all_in_capacity), sonra model bazlı fallback
+        tanim_obj = self._terminal_tanim.get(tid)
+        atm_spesifik_kap = getattr(tanim_obj, 'all_in_capacity', 0) or 0
+        if atm_spesifik_kap > 0:
+            allin_kap_b = atm_spesifik_kap
+        else:
+            allin_kap_b = (
+                BusinessRules.kaset_kapasitesi_al(atm_modeli, 'cashin_kaset_allin') or
+                BusinessRules.kaset_kapasitesi_al(atm_modeli, 'cashin_kaset_standart') or
+                2200   # Genel varsayılan — gerçek kapasite ~2000-2500 banknot
+            )
+        allin_kap_tl = allin_kap_b * 150   # Ortalama küpür proxy
+        hedef_tl     = allin_kap_tl * BusinessRules.ALLIN_KASET_TOPLAMA_ESIK  # %85 toplama eşiği
+
+        kalan_tl = hedef_tl - bakiye.yatan_para
+        if kalan_tl <= 0:
+            return 0.0   # Zaten eşikte — hemen topla
+
+        return kalan_tl / fill_hizi   # saat
 
     # ──────────────────────────────────────────────────────────────────────────
     # ANA KARAR DÖNGÜSÜ — Tüm ATM'leri tarar, kararları üretir
@@ -606,6 +988,14 @@ class ATMBrainOrchestrator:
                         aciliyet = 'YUKSEK'
                         sebepler.append(
                             "Maaş dönemi — talep %20-30 artar, tahmin süre daha kısa"
+                        )
+                    # ── ANAYASAL KURAL: Bayram öncesi tedbir ────────────────────
+                    bayram_mi, bayram_tarih = BusinessRules.is_bayram_oncesi(simdi)
+                    if bayram_mi:
+                        aciliyet = 'YUKSEK'
+                        sebepler.append(
+                            f"🕌 BAYRAM ÖNCESİ ({bayram_tarih}): Çekim hacmi %{BusinessRules.BAYRAM_ONCESI_HACIM_ARTISI*100:.0f} artacak "
+                            f"— ATM boş kalmamalı, ikmal önceliklendirilsin"
                         )
 
             # ── B) ARIZA PROAKTİF TAHMİN (XGBoost) ─────────────────────────
@@ -861,6 +1251,21 @@ class ATMBrainOrchestrator:
                     "Maaş dönemi — talep artışı bekleniyor, ikmal tutarı artırılsın"
                 )
 
+            # ── ANAYASAL KURAL: Bayram öncesi — toplama minimum, ATM boş kalmasın ──────────
+            bayram_mi, bayram_tarih = BusinessRules.is_bayram_oncesi(simdi)
+            if bayram_mi:
+                if ikmal_gerekli:
+                    nakit_aciliyeti = 'YUKSEK' if nakit_aciliyeti not in ('KRITIK',) else nakit_aciliyeti
+                    sebepler.append(
+                        f"🕌 BAYRAM ÖNCESİ ({bayram_tarih}): Çekim %{BusinessRules.BAYRAM_ONCESI_HACIM_ARTISI*100:.0f} artacak "
+                        f"— ikmal öncelikli, ATM asla boş bırakılmaz"
+                    )
+                if toplama_gerekli and BusinessRules.BAYRAM_ONCESI_TOPLAMA_MOD == 'MINIMUM':
+                    sebepler.append(
+                        f"🕌 BAYRAM ÖNCESİ: Para toplama minimum modda "
+                        f"— toplama tarihi bayram sonrasına ertele"
+                    )
+
             # Toplama gerekli
             if tl_bakiye >= BusinessRules.NAKIT_ACIL_TOPLAMA:
                 toplama_gerekli = True
@@ -886,6 +1291,114 @@ class ATMBrainOrchestrator:
                 sebepler.append(
                     f"Recycle {recycle_dol:.0%} dolu — boşaltılmalı"
                 )
+
+            # ── ANAYASAL KURAL 1: All-in kaset doluluk kontrolü (%90 = dolu, %85 = planla) ──
+            atm_modeli   = getattr(tanim, 'atm_modeli', '') or ''
+            # Önce ATM'ye özgün kapasite (Excel'den alındı), yoksa model bazlı fallback
+            atm_spesifik = getattr(tanim, 'all_in_capacity', 0) or 0
+            if atm_spesifik > 0:
+                allin_kap_b = atm_spesifik
+            else:
+                allin_kap_b  = (BusinessRules.kaset_kapasitesi_al(atm_modeli, 'cashin_kaset_allin')
+                                or BusinessRules.kaset_kapasitesi_al(atm_modeli, 'cashin_kaset_standart')
+                                or BusinessRules.kaset_kapasitesi_al(atm_modeli, 'cashin_kaset'))
+            # Ortalama yatırılan küpür 150 TL (100+200 TL karışık) ile TL'ye çevir
+            allin_kap_tl = allin_kap_b * 150
+            if allin_kap_tl > 0 and bakiye.yatan_para > 0:
+                allin_oran = bakiye.yatan_para / allin_kap_tl
+                if allin_oran >= BusinessRules.ALLIN_KASET_DOLU_ESIK:
+                    toplama_gerekli = True
+                    if nakit_aciliyeti not in ('KRITIK',):
+                        nakit_aciliyeti = 'KRITIK'
+                    sebepler.append(
+                        f"🚨 All-in kaset %{allin_oran*100:.0f} dolu "
+                        f"— ATM yatırmaya kapandı, derhal topla!"
+                    )
+                elif allin_oran >= BusinessRules.ALLIN_KASET_TOPLAMA_ESIK:
+                    toplama_gerekli = True
+                    sebepler.append(
+                        f"⚠️ All-in kaset %{allin_oran*100:.0f} dolu "
+                        f"(eşik: %{BusinessRules.ALLIN_KASET_TOPLAMA_ESIK*100:.0f}) — toplama planla"
+                    )
+
+            # ── ANAYASAL KURAL 2: Zone 2+ planlı gün yeterli mi? ───────────────────────────
+            try:
+                zone = int(str(getattr(tanim, 'zone', '3') or '3'))
+            except (ValueError, TypeError):
+                zone = 3
+            if zone >= 2 and gunluk_tuketim > 0 and not ikmal_gerekli and bakiye.tl_bakiye > 0:
+                kalan_gun = bakiye.tl_bakiye / gunluk_tuketim
+                # Sabit "5 gün" eşiği YERİNE: Bu ATM'nin kendi servis takvimine göre hesapla.
+                # _sonraki_servis_gun_hesapla() hizmet_gunleri alanından gerçek mesafeyi döner.
+                sonraki_servis_gun = self._sonraki_servis_gun_hesapla(tid, simdi)
+                # %20 güvenlik tamponu: Örn. servis 3 gün sonra → 3.6 güne yetmeli
+                guvenlik_tampon    = max(1.0, sonraki_servis_gun * 0.20)
+                if kalan_gun < (sonraki_servis_gun + guvenlik_tampon):
+                    ikmal_gerekli = True
+                    if nakit_aciliyeti in ('YOK',):
+                        nakit_aciliyeti = 'ORTA'
+                    sebepler.append(
+                        f"⚠️ Zone {zone} erken müdahale: ~{kalan_gun:.1f} gün nakit kaldı, "
+                        f"planlı servis {sonraki_servis_gun:.0f} gün sonra "
+                        f"(+{guvenlik_tampon:.1f}g emniyet tamponu) → limit altı ikmal"
+                    )
+
+            # ── ANAYASAL KURAL 3: Politika faizi ekonomi analizi (toplama kararı için) ──────
+            # Acil/yüksek durumlarda ekonomi analizini atla, sadece rutin toplamada uygula
+            if toplama_gerekli and BusinessRules.TOPLAMA_MALIYET_KARSILAMA_ZORUNLU:
+                if nakit_aciliyeti not in ('KRITIK', 'YUKSEK') and not ikmal_gerekli:
+                    politika_faizi_yillik = float(
+                        getattr(tanim, 'politika_faizi_yillik', None) or 45.0
+                    )
+                    toplam_toplanacak = bakiye.tl_bakiye + (bakiye.recycle_bakiye or 0)
+                    ekonomik = BusinessRules.toplama_yapilabilir_mi(
+                        toplam_toplanacak,
+                        BusinessRules.MALIYET_TOPLAMA_PLANLI,
+                        politika_faizi_yillik,
+                    )
+                    if not ekonomik:
+                        toplama_gerekli = False
+                        sebepler.append(
+                            f"⚠️ Faiz analizi: Günlük faiz geliri (%{politika_faizi_yillik:.0f} p.a.) "
+                            f"toplama maliyetini ({BusinessRules.MALIYET_TOPLAMA_PLANLI} TL) "
+                            f"karşılamıyor — toplama 1 gün ertele"
+                        )
+
+            # ── ANAYASAL KURAL 4: Tahminsel taşma — fill velocity bazlı, saat bağımsız ──────
+            # Eski kural: "Gece 23:00'de yatırma oranı %80'i geçiyor mu? → kayıt aç"
+            # Yeni kural: "Fill hızıyla ATM ne zaman taşar? Planlı servisten önce taşacak mı?"
+            # Bu kural MEVCUT BİR TOPLAMA KARARI OLMASA BİLE çalışır (proaktif tetikleme).
+            if not toplama_gerekli and bakiye:
+                atm_modeli_str = getattr(tanim, 'atm_modeli', '') or '' if tanim else ''
+                overflow_saat  = self._overflow_tahmin_et(tid, bakiye, atm_modeli_str)
+                if overflow_saat is not None:
+                    fill_hizi_val      = self._fill_hizi_hesapla(tid) or 0.0
+                    sonraki_servis_gun = self._sonraki_servis_gun_hesapla(tid, simdi)
+                    sonraki_servis_saat = sonraki_servis_gun * 24.0
+                    # Bayram yakınsa servis gecikmesi riski artıyor → tamponu büyüt
+                    bayram_mi_val, _ = BusinessRules.is_bayram_oncesi(simdi)
+                    if bayram_mi_val:
+                        sonraki_servis_saat *= (1.0 + BusinessRules.BAYRAM_ONCESI_HACIM_ARTISI)
+                    # Overflow + güvenlik tamponu < planlı servise kalan süre?
+                    toplam_bekleme = sonraki_servis_saat + BusinessRules.OVERFLOW_GUVENLIK_TAMPONU_SAAT
+                    if overflow_saat <= toplam_bekleme:
+                        toplama_gerekli = True
+                        # Aciliyet: taşmaya ne kadar kaldığına göre belirle
+                        if overflow_saat <= 4:
+                            if nakit_aciliyeti not in ('KRITIK',):
+                                nakit_aciliyeti = 'KRITIK'
+                        elif overflow_saat <= 12:
+                            if nakit_aciliyeti in ('YOK', 'DUSUK'):
+                                nakit_aciliyeti = 'YUKSEK'
+                        else:
+                            if nakit_aciliyeti in ('YOK',):
+                                nakit_aciliyeti = 'ORTA'
+                        sebepler.append(
+                            f"🔮 TAHMİNSEL TAŞMA: Fill hızı {fill_hizi_val:,.0f} TL/saat → "
+                            f"~{overflow_saat:.0f} saatte all-in kaset %{BusinessRules.ALLIN_KASET_TOPLAMA_ESIK*100:.0f} "
+                            f"eşiğine ulaşır. Planlı servis {sonraki_servis_gun:.0f} gün sonra "
+                            f"— servis gelmeden taşacak, şimdi kayıt aç."
+                        )
 
         # ── 3. KOMBİNE SERVİS FIRSATI (Tasarrufun kalbi) ─────────────────────
         #

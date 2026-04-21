@@ -1,0 +1,68 @@
+{
+  "versiyon": "20260324_214143",
+  "tarih": "2026-03-24T21:41:43.169239",
+  "aciklama": "XFS log analizi — ATM 7851 — 2026-03-09 — 215 birikimli kayıt",
+  "ogrenen_atm": 4,
+  "ogrenilen": {
+    "HWBRMSAE410019P1": {
+      "gecmis_risk_skoru": 1.0,
+      "kronik_arizalar": [
+        "NAKIT_MODÜL BANKNOT DOĞRULAMA HATASI (UYGUNSUZ/ŞÜPHELI BANKNOT)",
+        "SHUTTER / TRANSPORT SIKIŞMASI (JAM)",
+        "NAKIT_MODÜL RETRACT HATASI (BANKNOT YUTMA MOTORU)",
+        "NAKIT_MODÜL VALIDATOR SENSÖR HATASI (OKUMA/KALIBRASYON)",
+        "CASHIN END HATASI (IŞLEM TAMAMLANAMADI)",
+        "BILINMEYEN HATA KODU: 5F00009",
+        "BILINMEYEN HATA KODU: 5A15521",
+        "BILINMEYEN HATA KODU: 5A21521"
+      ],
+      "ort_flm_sure_dk": 15182.328571428572,
+      "ort_slm_sure_dk": 15182.328571428572
+    },
+    "CONFIGURE": {
+      "gecmis_risk_skoru": 1.0,
+      "kronik_arizalar": [
+        "NAKIT_MODÜL VALIDATOR SENSÖR HATASI (OKUMA/KALIBRASYON)",
+        "BILINMEYEN HATA KODU: 2",
+        "NAKIT_MODÜL BANKNOT DOĞRULAMA HATASI (UYGUNSUZ/ŞÜPHELI BANKNOT)",
+        "BILINMEYEN HATA KODU: 5740010",
+        "BILINMEYEN HATA KODU: 5669062",
+        "NAKIT_MODÜL RETRACT HATASI (BANKNOT YUTMA MOTORU)",
+        "BILINMEYEN HATA KODU: 5A15521",
+        "BILINMEYEN HATA KODU: 5660084",
+        "BILINMEYEN HATA KODU: 5518061",
+        "BILINMEYEN HATA KODU: 55A8069"
+      ],
+      "ort_flm_sure_dk": 12207.511111111111,
+      "ort_slm_sure_dk": 12207.511111111111
+    },
+    "UNKNOWN": {
+      "gecmis_risk_skoru": 1.0,
+      "kronik_arizalar": [
+        "CARD_READER_MAJOR IDC_CRITICAL_SLOW_READ",
+        "CARD_READER_MINOR IDC_VERY_SLOW_READ",
+        "CARD_READER_MINOR IDC_SLOW_READ",
+        "CARD_READER_MAJOR IDC_CRITICAL_TIMEOUT_CANCEL",
+        "CARD_READER_MINOR IDC_TIMEOUT_CANCEL",
+        "CARD_READER_MINOR IDC_IDC_RESET"
+      ],
+      "ort_flm_sure_dk": 0,
+      "ort_slm_sure_dk": 0
+    },
+    "7851": {
+      "gecmis_risk_skoru": 1.0,
+      "kronik_arizalar": [
+        "CARD_READER_MINOR XFS_LATENCY_CRITICAL",
+        "CARD_READER_MINOR XFS_IDC_READ_ERROR_0",
+        "CARD_READER_MAJOR XFS_IDC_HW_ERROR",
+        "CARD_READER_MAJOR XFS_HOST_RESP_ERROR_FC-",
+        "CARD_READER_MAJOR XFS_HOST_RESP_ERROR_FCA",
+        "CARD_READER_MAJOR XFS_HOST_RESP_ERROR_FCM",
+        "CARD_READER_MAJOR XFS_HOST_RESP_ERROR_FCO",
+        "CARD_READER_MAJOR XFS_HOST_RESP_ERROR_FC2"
+      ],
+      "ort_flm_sure_dk": 0,
+      "ort_slm_sure_dk": 0
+    }
+  }
+}

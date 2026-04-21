@@ -41,6 +41,9 @@ const BEKLENEN_KOLONLAR: Record<string, string[]> = {
   para_toplama:  ["terminal_id", "tarih", "toplama_tutar"],
   gunluk_bakiye: ["terminal_id", "tarih", "tl_bakiye", "kaset_1", "kaset_2",
                   "kaset_3", "kaset_4", "recycle_bakiye"],
+  // XFS: tab-separated metin log, kolonlar sabit (17 kolon)
+  xfs_log:       ["terminal_id", "session_id", "event_zaman", "mesaj_tipi",
+                  "komut", "result", "detay", "session_tipi"],
 };
 
 // Kolon alias eşleştirme — bankadan gelen farklı isimler
@@ -87,6 +90,57 @@ export async function POST(req: NextRequest) {
     }
 
     logEntry.dosya_adi = file.name;
+
+    // ── XFS Log: metin dosyası (All.txt), Excel değil ─────────────────────
+    if (veri_turu === "xfs_log") {
+      const rawText = Buffer.from(await file.arrayBuffer()).toString("utf-8");
+      const satirSayisi = rawText.split("\n").filter((l) => l.trim()).length;
+      logEntry.satir_sayisi = satirSayisi;
+      logEntry.kolonlar     = BEKLENEN_KOLONLAR["xfs_log"];
+
+      // Kaydı log'a yaz
+      const logArr = loadLog();
+      logArr.unshift(logEntry as TrainingLogEntry);
+      saveLog(logArr.slice(0, 100));
+
+      // Raw txt dosyasını kaydet
+      mkdirSync(UPLOADS_DIR, { recursive: true });
+      const txtFname = `xfs_log_${yil}_${ay.padStart(2, "0")}_${Date.now()}.txt`;
+      writeFileSync(join(UPLOADS_DIR, txtFname), rawText, "utf-8");
+
+      // Beyne gönder: /api/v1/xfs-log-raw
+      let beyinSonucu: Record<string, unknown> | null = null;
+      try {
+        const beyinRes = await fetch("http://localhost:8000/api/v1/xfs-log-raw", {
+          method : "POST",
+          headers: { "Content-Type": "application/json" },
+          body   : JSON.stringify({ raw_log: rawText }),
+          signal : AbortSignal.timeout(60_000),   // XFS dosyaları büyük olabilir
+        });
+        if (beyinRes.ok) {
+          beyinSonucu = await beyinRes.json() as Record<string, unknown>;
+        } else {
+          beyinSonucu = { uyari: `Beyin yanıt vermedi (HTTP ${beyinRes.status})` };
+        }
+      } catch {
+        beyinSonucu = {
+          uyari: "Beyin servisi şu an kapalı (port 8000). " +
+                 "Log kaydedildi; python3 ai_engine/api_server.py ile servisi başlatın.",
+        };
+      }
+
+      return NextResponse.json({
+        success          : true,
+        satir_sayisi     : satirSayisi,
+        kolonlar         : BEKLENEN_KOLONLAR["xfs_log"],
+        eslesen_kolonlar : BEKLENEN_KOLONLAR["xfs_log"],
+        beklenen_kolonlar: BEKLENEN_KOLONLAR["xfs_log"],
+        eslesme_orani    : 100,
+        mesaj            : `${satirSayisi.toLocaleString("tr-TR")} satır XFS logu işlendi.`,
+        dosya_adi        : txtFname,
+        beyin            : beyinSonucu,
+      });
+    }
 
     const buf      = Buffer.from(await file.arrayBuffer());
     const workbook = XLSX.read(buf, { type: "buffer", cellDates: true });

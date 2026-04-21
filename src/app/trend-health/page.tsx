@@ -181,6 +181,15 @@ const VERI_TURLERI = [
     kolonlar: ["terminal_id", "tarih", "tl_bakiye", "kaset_1", "kaset_2", "kaset_3", "kaset_4", "recycle_bakiye"],
     aciklama: "Günlük kaset ve bakiye durumu",
   },
+  {
+    id: "xfs_log",
+    label: "XFS Uygulama Logu",
+    icon: "🖥️",
+    renk: "text-purple-400 border-purple-500/40 bg-purple-500/10",
+    aktif: "border-purple-400 bg-purple-500/20 text-purple-300",
+    kolonlar: ["terminal_id", "session_id", "event_zaman", "mesaj_tipi", "komut", "result", "detay", "session_tipi"],
+    aciklama: "XFS uygulama logu (All.txt — tab-separated .txt dosyası)",
+  },
 ];
 
 const AYLAR = [

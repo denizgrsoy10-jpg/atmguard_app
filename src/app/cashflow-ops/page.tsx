@@ -30,27 +30,27 @@ const CASHFLOW_METRIC_EXPLANATIONS: Record<string, MetricInfo> = {
   },
   "low_cash_atms": {
     title: "Düşük Nakit ATM Sayısı",
-    description: "Nakit seviyesi kritik eşiğin altına düşmüş ATM'lerin sayısı. Acil ikmal gerektirebilir.",
+    description: "Nakit seviyesi kritik eşiğin altına düşmüş ATM'lerin sayısı. Acil ikmal gerektirebilir. Eşik: ₺50.000 KRİTİK / ₺100.000 DÜŞÜK.",
     purpose: "Kıtlık riskini tespit etmek. Hangi ATM'ler yakında nakit biter?",
-    interpretation: "Yüksek sayı = CIT operasyonları yetersiz veya talep tahmini hatalı. Hızlı aksiyon gerekli, müşteri memnuniyeti riski."
+    interpretation: "Yüksek sayı = CIT operasyonları yetersiz veya talep tahmini hatalı. Zone 2+ ATM'lerde servis takvimine göre (hizmet_gunleri alanı) planlı güne yetmeyecekse limit altı ikmal tetiklenir."
   },
   "predicted_shortage": {
     title: "Tahmini Kıtlık (7 Gün)",
-    description: "Önümüzdeki 7 gün içinde nakit tükenmesi beklenen ATM sayısı. AI tahmin modeli sonucu.",
+    description: "Önümüzdeki 7 gün içinde nakit tükenmesi beklenen ATM sayısı. AI tahmin modeli sonucu. Bayram/maaş dönemlerinde hacim %20-50 artar.",
     purpose: "Proaktif planlama. Hangi ATM'lere öncelikle ikmal yapılmalı?",
     interpretation: "0 = ideal durum. Yüksek sayı = CIT planlaması yapılmalı, aksi halde servis kesintisi riski. Tahmin doğruluğu kritik."
   },
   "planned_replenishments": {
     title: "Planlı İkmal Sayısı (7 Gün)",
-    description: "Önümüzdeki 7 gün için planlanmış nakit ikmali operasyonlarının sayısı.",
+    description: "Önümüzdeki 7 gün için planlanmış nakit ikmali operasyonlarının sayısı. Plansız ikmal maliyeti ₺320 (planlı: ₺180) — her plansız kayıt ek ₺140 maliyet demektir.",
     purpose: "CIT operasyonel yükünü ve lojistik kapasiteyi göstermek. Planlama yapıldı mı?",
     interpretation: "Planned Repl. >= Pred. Shortage olmalı. Düşükse bazı ATM'ler atlanmış, kıtlık riski var. Yüksekse gereksiz maliyetli operasyonlar."
   },
   "heat_map": {
-    title: "Low Cash ATM Heat Map (Düşük Nakit Isı Haritası)",
-    description: "Türkiye haritası üzerinde düşük nakit seviyeli ATM'lerin yoğunluk haritası. Kırmızı alanlar yüksek yoğunluk, yeşil alanlar düşük yoğunluk gösterir.",
-    purpose: "Coğrafi nakit kıtlığı dağılımını görselleştirmek. Hangi bölgelerde nakit sıkıntısı yoğunlaşmış? CIT ekipleri nereye odaklanmalı?",
-    interpretation: "Kırmızı/turuncu bölgeler = Yüksek risk, o bölgeye CIT rotası planlanmalı. Yeşil bölgeler = Stabil durum. Şehir merkezlerinde yoğunluk normaldir (yüksek işlem hacmi). Beklenmedik yerlerde yoğunluk varsa operasyonel sorun olabilir."
+    title: "ATM Nakit Yoğunluk Haritası",
+    description: "Türkiye haritası üzerinde düşük/yüksek nakit seviyeli ATM'lerin yoğunluk haritası. İkmal görünümü: kırmızı = kritik, yeşil = stabil. Para Toplama görünümü: %85+ doluluk = toplama planla, %90+ = ATM yatırmaya kapanır.",
+    purpose: "Coğrafi nakit kıtlığı/fazlası dağılımını görselleştirmek. CIT ekipleri nereye odaklanmalı?",
+    interpretation: "Kırmızı/turuncu bölgeler = Yüksek risk, o bölgeye CIT rotası planlanmalı. Para Toplama: All-in kaset %90 dolduğunda ATM yatırmaya kapanır → önce bunlara git."
   },
   "cash_trend_forecast": {
     title: "Cash Trend & Forecast (Nakit Trend ve Tahmin)",
@@ -183,29 +183,9 @@ export default function CashFlowOpsPage() {
     new Date(Date.now() + 2 * 86400_000).toISOString().slice(0, 10)
   );
 
-  // Tüm öneri verisi — gerçek API bağlandığında buradan gelecek
+  // Para toplama önerileri — /api/cashflow/collection-plan'dan gelir
+  const [allSuggestions, setAllSuggestions] = useState<any[]>([]);
   const today = new Date().toISOString().slice(0, 10);
-  const d1    = new Date(Date.now() + 1 * 86400_000).toISOString().slice(0, 10);
-  const d2    = new Date(Date.now() + 2 * 86400_000).toISOString().slice(0, 10);
-  const d3    = new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10);
-  const d5    = new Date(Date.now() + 5 * 86400_000).toISOString().slice(0, 10);
-  const d6    = new Date(Date.now() + 6 * 86400_000).toISOString().slice(0, 10);
-
-  const allSuggestions = useMemo(() => [
-    { id: 1,  tarih: today, type: "collection",    atmId: "FA026", atmName: "BATI ATASEHIR SUBE 2",        city: "İstanbul",  district: "Ataşehir",  priority: "high",   reason: "Kaset %89 dolu (Cuma öğleden sonra maaş yoğunluğu tahmini)",            eta: "18:00",    confidence: 96 },
-    { id: 2,  tarih: today, type: "collection",    atmId: "FA032", atmName: "41 DARICA EMEK",              city: "Kocaeli",   district: "Darıca",    priority: "high",   reason: "Hafta sonu + Finbor lokasyonu, %91 doluluk",                       eta: "16:30",    confidence: 94 },
-    { id: 3,  tarih: today, type: "collection",    atmId: "FA025", atmName: "01 SARICAM H.SABANCI OSB",    city: "Adana",     district: "Sarıçam",   priority: "medium", reason: "Organize sanayi bölgesi - Cuma akşam yoğunluk paterni",             eta: "19:00",    confidence: 92 },
-    { id: 4,  tarih: d1,    type: "collection",    atmId: "FA034", atmName: "16 BURSA FOMARA",             city: "Bursa",     district: "Nilüfer",   priority: "high",   reason: "AVM lokasyonu - Cumartesi alışveriş yoğunluğu, %87 doluluk",          eta: "17:00",    confidence: 93 },
-    { id: 5,  tarih: d1,    type: "replenishment", atmId: "FA018", atmName: "07 ALANYA OTOGAR",            city: "Antalya",   district: "Alanya",    priority: "medium", reason: "Pazartesi sabahı tükenmeden önleyici ikmal",                           eta: "Pzr 22:00", confidence: 88 },
-    { id: 6,  tarih: d1,    type: "collection",    atmId: "FA023", atmName: "35 KONAK KEMERALT",           city: "İzmir",     district: "Konak",     priority: "high",   reason: "Tarihi çarşı bölgesi - Hafta sonu turist yoğunluğu, %90 doluluk",     eta: "15:30",    confidence: 95 },
-    { id: 7,  tarih: d2,    type: "replenishment", atmId: "FA006", atmName: "06 ANKARA KIZILAY",           city: "Ankara",    district: "Çankaya",   priority: "high",   reason: "Metro istasyonu - Pazartesi sabah trafiği öncesi kritik seviye",    eta: "Pzr 23:00", confidence: 91 },
-    { id: 8,  tarih: d2,    type: "collection",    atmId: "FA024", atmName: "41 GEBZE ORGANIZE",           city: "Kocaeli",   district: "Gebze",     priority: "medium", reason: "Sanayi bölgesi - Haftalık maaş ödemesi sonrası, %84 doluluk",          eta: "19:30",    confidence: 89 },
-    { id: 9,  tarih: d3,    type: "replenishment", atmId: "FA019", atmName: "01 ANTALYA HAVALIMANI",       city: "Antalya",   district: "Serik",     priority: "medium", reason: "Havaimanı - Pazar akşam uçuş yoğunluğu öncesi",                       eta: "Paz 20:00", confidence: 87 },
-    { id: 10, tarih: d3,    type: "collection",    atmId: "FA033", atmName: "27 S.BEY KARATAS PO 2",       city: "Gaziantep", district: "Şahinbey",  priority: "medium", reason: "Petrol ofisi - Hafta sonu seyahat trafiği, %86 doluluk",              eta: "18:30",    confidence: 90 },
-    { id: 11, tarih: d5,    type: "replenishment", atmId: "FA015", atmName: "16 KADIKOY ISKELE",           city: "İstanbul",  district: "Kadıköy",   priority: "low",    reason: "Vapur iskelesi - Pazartesi sabah yolcu yoğunluğu",                   eta: "Pzr 21:30", confidence: 85 },
-    { id: 12, tarih: d6,    type: "collection",    atmId: "FA028", atmName: "07 IZMIR ALSANCAK",           city: "İzmir",     district: "Konak",     priority: "medium", reason: "Tren garı yakını - Hafta sonu seyahat yoğunluğu, %88 doluluk",         eta: "17:30",    confidence: 91 },
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [today, d1, d2, d3, d5, d6]);
 
   // AI Engine date range
   const [aiEngineDateStart, setAiEngineDateStart] = useState<string>(
@@ -397,19 +377,32 @@ export default function CashFlowOpsPage() {
       }));
       if (!alive) return;
       setLowCashAtms(lowCash);
-      
-      // High Cash ATMs (Para Toplama gerekli) - mock: cash level > 85%
-      const highCash = atms.slice(143, 167).map((a: any) => ({
-        atm_id: String(a.atm_id),
-        atm_name: a.atm_name || "N/A",
-        city: a.city,
-        district: a.district,
-        cash_level: Math.floor(Math.random() * 15) + 85, // Mock: 85-100% full
-        latitude: typeof a.latitude === 'string' ? parseFloat(a.latitude.replace(',', '.')) : a.latitude,
-        longitude: typeof a.longitude === 'string' ? parseFloat(a.longitude.replace(',', '.')) : a.longitude,
-      }));
-      setHighCashAtms(highCash);
-      
+
+      // High Cash ATMs + Para Toplama Önerileri — all_in_capacity bazlı gerçek hesaplama
+      try {
+        const cpRes = await fetch("/api/cashflow/collection-plan", { cache: "no-store" });
+        if (cpRes.ok) {
+          const cpData = await cpRes.json();
+          if (!alive) return;
+          // highCashAtms: harita için doluluk > 85%
+          setHighCashAtms(
+            (cpData.high_cash_atms || []).map((a: any) => ({
+              atm_id: a.atm_id,
+              atm_name: a.atm_name,
+              city: a.city,
+              district: a.district,
+              cash_level: a.fill_pct,
+              latitude: a.latitude,
+              longitude: a.longitude,
+            }))
+          );
+          // allSuggestions: AI para toplama plan önerileri
+          setAllSuggestions(cpData.collection_suggestions || []);
+        }
+      } catch (cpErr) {
+        console.warn("collection-plan API hatası, mock kullanılıyor", cpErr);
+      }
+
       setShortageAtms(shortage);
       setReplAtms(repl);
       
@@ -1653,7 +1646,7 @@ export default function CashFlowOpsPage() {
                   const viewLabel = heatMapView === "low_cash" ? "Düşük Nakit" : "Yüksek Nakit";
                   const riskLabels = heatMapView === "low_cash" 
                     ? { critical: "Kritik (< 20%)", low: "Düşük (20-30%)", normal: "Normal (> 30%)" }
-                    : { critical: "Kritik (> 95%)", high: "Yüksek (90-95%)", normal: "Normal (< 90%)" };
+                    : { critical: "Kritik (≥90%) — ATM Yatırmaya Kapandı", high: "Yüksek (85-90%) — Toplama Planla", normal: "Normal (<85%)" };
                   
                   const csvContent = '\uFEFF' + viewLabel + ' ATM Haritası Raporu\n' +
                     'Rapor Tarihi: ' + new Date().toLocaleDateString('tr-TR') + '\n' +
@@ -1668,12 +1661,12 @@ export default function CashFlowOpsPage() {
                     '\n\nRisk Seviyesi Tanımları:\n' +
                     (heatMapView === "low_cash"
                       ? 'Kritik,< 20%,Acil ikmal gerekli - CIT planlanmalı\nDüşük,20-30%,Yakın takip - İkmal planına alınmalı\nNormal,> 30%,Stabil durum - Normal izleme'
-                      : 'Kritik,> 95%,Acil para toplama gerekli\nYüksek,90-95%,Para toplama planlanmalı\nNormal,< 90%,Stabil durum') +
+                      : 'Kritik,≥90%,ATM yatırmaya kapandı — acil para toplama\nYüksek,85-90%,All-in kaset %85+ dolu — para toplama planlanmalı\nNormal,<85%,Stabil durum') +
                     '\n\nÖzet İstatistikler:\n' +
                     'Toplam ' + viewLabel + ' ATM,' + atmData.length + '\n' +
                     (heatMapView === "low_cash"
                       ? 'Kritik Risk,' + atmData.filter(a => a.cash_level < 20).length + '\nDüşük Risk,' + atmData.filter(a => a.cash_level >= 20 && a.cash_level < 30).length + '\nNormal,' + atmData.filter(a => a.cash_level >= 30).length
-                      : 'Kritik (> 95%),' + atmData.filter(a => a.cash_level > 95).length + '\nYüksek (90-95%),' + atmData.filter(a => a.cash_level >= 90 && a.cash_level <= 95).length + '\nNormal (< 90%),' + atmData.filter(a => a.cash_level < 90).length) +
+                      : 'Kritik (≥90%),' + atmData.filter(a => a.cash_level >= 90).length + '\nYüksek (85-90%),' + atmData.filter(a => a.cash_level >= 85 && a.cash_level < 90).length + '\nNormal (<85%),' + atmData.filter(a => a.cash_level < 85).length) +
                     '\n\nŞehir Bazlı Dağılım:\n' +
                     [...new Set(atmData.map(a => a.city))].map(city => {
                       const cityAtms = atmData.filter(a => a.city === city);
@@ -5180,15 +5173,15 @@ export default function CashFlowOpsPage() {
                   <>
                     <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#E63946]/20">
                       <span className="inline-block h-3 w-3 rounded-full" style={{ background: "#E63946" }} />
-                      <span className="text-white">Kritik (&gt;95%)</span>
+                      <span className="text-white">Kritik (≥90%) — Yatırmaya Kapandı</span>
                     </div>
                     <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#F59E0B]/20">
                       <span className="inline-block h-3 w-3 rounded-full" style={{ background: "#F59E0B" }} />
-                      <span className="text-white">Yüksek (90-95%)</span>
+                      <span className="text-white">Yüksek (85-90%) — Toplama Planla</span>
                     </div>
                     <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#10B981]/20">
                       <span className="inline-block h-3 w-3 rounded-full" style={{ background: "#10B981" }} />
-                      <span className="text-white">Normal (&lt;90%)</span>
+                      <span className="text-white">Normal (&lt;85%)</span>
                     </div>
                   </>
                 )}

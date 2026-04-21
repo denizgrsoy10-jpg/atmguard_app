@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -29,7 +30,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 # Kendi motorlarımız
-from atm_brain_orchestrator import ATMBrainOrchestrator, BeyinKarari
+from atm_brain_orchestrator import ATMBrainOrchestrator, BeyinKarari, BusinessRules
 
 # ─── Logging ────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -78,6 +79,72 @@ app.add_middleware(
 _brain: Optional[ATMBrainOrchestrator] = None
 _brain_hafiza_yuklendi: bool = False
 
+# BRM / IDC log analizleri için ATM bazında kümülatif hata geçmişi
+# { atm_id: [ {ariza_kodu, tarih, ...}, ... ] }
+# Her yeni log geldiğinde eklenir; diske persist edilir → server restart'ta kaybolmaz
+_brm_kumulatif: Dict[str, List[Dict]] = {}
+
+# ─── Log Geçmişi Kalıcı Depolama ────────────────────────────────────────────
+_LOG_HAFIZA_DIR  = Path("models")
+_BRM_LOG_HAFIZA  = _LOG_HAFIZA_DIR / "brm_log_history.json"
+_IDC_LOG_HAFIZA  = _LOG_HAFIZA_DIR / "idc_log_history.json"
+_XFS_LOG_HAFIZA  = _LOG_HAFIZA_DIR / "xfs_log_history.json"
+_log_hafiza_yuklendi: bool = False
+
+
+def _log_hafiza_yukle() -> None:
+    """BRM ve IDC kümülatif geçmişlerini diskten yükler (server startup'ta bir kez)."""
+    global _brm_kumulatif, _idc_kumulatif, _xfs_kumulatif, _log_hafiza_yuklendi
+    if _log_hafiza_yuklendi:
+        return
+    _log_hafiza_yuklendi = True
+    for hafiza_dosyasi, hedef_dict_ismi in [
+        (_BRM_LOG_HAFIZA, "_brm_kumulatif"),
+        (_IDC_LOG_HAFIZA, "_idc_kumulatif"),
+        (_XFS_LOG_HAFIZA, "_xfs_kumulatif"),
+    ]:
+        if hafiza_dosyasi.exists():
+            try:
+                with open(hafiza_dosyasi, encoding="utf-8") as f:
+                    data: Dict[str, List[Dict]] = json.load(f)
+                if hedef_dict_ismi == "_brm_kumulatif":
+                    _brm_kumulatif.update(data)
+                elif hedef_dict_ismi == "_xfs_kumulatif":
+                    _xfs_kumulatif.update(data)
+                else:
+                    _idc_kumulatif.update(data)
+                toplam = sum(len(v) for v in data.values())
+                logger.info(
+                    f"📂 {hedef_dict_ismi} diskten yüklendi — "
+                    f"{len(data)} ATM, {toplam} kayıt ({hafiza_dosyasi})"
+                )
+            except Exception as e:
+                logger.warning(f"Log hafızası yükleme hatası ({hafiza_dosyasi}): {e}")
+
+
+def _log_hafiza_kaydet(log_turu: str) -> None:
+    """Güncel kümülatif geçmişi diske yazar. log_turu: 'brm', 'idc' veya 'xfs'."""
+    try:
+        _LOG_HAFIZA_DIR.mkdir(parents=True, exist_ok=True)
+        if log_turu == "brm":
+            with open(_BRM_LOG_HAFIZA, "w", encoding="utf-8") as f:
+                json.dump(_brm_kumulatif, f, ensure_ascii=False)
+            toplam = sum(len(v) for v in _brm_kumulatif.values())
+            logger.info(f"💾 BRM log geçmişi kaydedildi — {len(_brm_kumulatif)} ATM, {toplam} kayıt")
+        elif log_turu == "xfs":
+            with open(_XFS_LOG_HAFIZA, "w", encoding="utf-8") as f:
+                json.dump(_xfs_kumulatif, f, ensure_ascii=False)
+            toplam = sum(len(v) for v in _xfs_kumulatif.values())
+            logger.info(f"💾 XFS log geçmişi kaydedildi — {len(_xfs_kumulatif)} ATM, {toplam} kayıt")
+        else:
+            with open(_IDC_LOG_HAFIZA, "w", encoding="utf-8") as f:
+                json.dump(_idc_kumulatif, f, ensure_ascii=False)
+            toplam = sum(len(v) for v in _idc_kumulatif.values())
+            logger.info(f"💾 IDC log geçmişi kaydedildi — {len(_idc_kumulatif)} ATM, {toplam} kayıt")
+    except Exception as e:
+        logger.error(f"Log hafızası kaydetme hatası ({log_turu}): {e}")
+
+
 def get_brain() -> ATMBrainOrchestrator:
     global _brain, _brain_hafiza_yuklendi
     if _brain is None:
@@ -92,6 +159,8 @@ def get_brain() -> ATMBrainOrchestrator:
                 f"⚡ Beyin önceki hafızasıyla uyandı — "
                 f"{sonuc['yuklenen_atm']} ATM, v{sonuc['versiyon']}"
             )
+    # Log geçmişlerini de yükle (hem BRM hem IDC)
+    _log_hafiza_yukle()
     return _brain
 
 
@@ -354,6 +423,38 @@ class BrmLogAnalizRequest(BaseModel):
     health_score: Optional[int] = None
 
 
+# IDC kümülatif geçmişi (BRM ile aynı mantık, ayrı dict)
+_idc_kumulatif: Dict[str, List[Dict]] = {}
+
+# XFS uygulama logu kümülatif geçmişi (All.txt formatı)
+_xfs_kumulatif: Dict[str, List[Dict]] = {}
+
+
+class IdcLogAnalizRequest(BaseModel):
+    """IDC (kart okuyucu) log parser çıktısı."""
+    log_type:              str                = "IDC"
+    atm_id:               str                = "UNKNOWN"
+    log_date:             Optional[str]       = None
+    health_score:         Optional[int]       = None
+    total_sessions:       int                 = 0
+    ok_count:             int                 = 0
+    cancel_count:         int                 = 0
+    retain_count:         int                 = 0
+    reset_count:          int                 = 0
+    slow_read_count:      int                 = 0
+    very_slow_count:      int                 = 0
+    critical_slow_count:  int                 = 0
+    timeout_cancel_count: int                 = 0
+    critical_cancel_count:int                 = 0
+    avg_ok_duration_sec:  float               = 0.0
+    max_duration_sec:     float               = 0.0
+    cancel_rate:          float               = 0.0
+    chip_io_total:        int                 = 0
+    eject_count:          int                 = 0
+    errors:               List[Dict]          = []
+    card_sessions:        List[Dict]          = []
+
+
 @app.post(
     "/api/v1/brm-log-analiz",
     tags=["Feed — Arıza Tarafı"],
@@ -417,9 +518,25 @@ def brm_log_analiz(req: BrmLogAnalizRequest):
         if req.atm_id not in brain._terminal_tanim:
             brain.ingest_terminal_tanim([{"terminal_id": req.atm_id}])
 
+        # Güncel arızaları beyne besle (aktif durum için)
         brain.ingest_ariza_feed(ariza_feed)
-        ogrenme_sayisi = len(ariza_feed)
-        logger.info(f"[BRM LOG ANALİZ] {ogrenme_sayisi} arıza beyne beslendi → ATM: {req.atm_id}")
+
+        # Kümülatif geçmişe ekle — her log, önceki logların üstüne birikmeli
+        if req.atm_id not in _brm_kumulatif:
+            _brm_kumulatif[req.atm_id] = []
+        _brm_kumulatif[req.atm_id].extend(ariza_feed)
+        # Hafızayı sınırla — max son 500 arıza (RAM koruma)
+        if len(_brm_kumulatif[req.atm_id]) > 500:
+            _brm_kumulatif[req.atm_id] = _brm_kumulatif[req.atm_id][-500:]
+
+        # Beyin tüm geçmişten öğrensin: risk skoru, kronik arıza, FLM/SLM oranı
+        brain.ingest_gecmis_ariza(_brm_kumulatif[req.atm_id])
+
+        ogrenme_sayisi = len(_brm_kumulatif[req.atm_id])
+        logger.info(
+            f"[BRM ÖĞRENME] ATM {req.atm_id}: toplam {ogrenme_sayisi} arıza geçmişi "
+            f"(bu log: {len(ariza_feed)} yeni)"
+        )
     else:
         ogrenme_sayisi = 0
 
@@ -433,6 +550,13 @@ def brm_log_analiz(req: BrmLogAnalizRequest):
                 seen_modules.add(m)
                 affected_modules.append(m)
 
+    # SLM kararında: Vendor teknisyen ATM'nin TUMÜNÜ inceler
+    # FLM arızaları da dahil — aynı ziyarette hepsi vendor tarafından kontrol edilir
+    # Bu yüzden module listesine "SLM" tagı ile işaretle
+    is_slm = any(str(e.get("service_type","")).upper() == "SLM" for e in (req.errors or []))
+    if is_slm:
+        affected_modules = [f"{m}" for m in affected_modules]  # hepsi vendor sorumluluğunda
+
     # ── 5) Geçmiş risk skoru (öğrenme sonrası güncellenmiş) ─────────────────
     tanim = brain._terminal_tanim.get(req.atm_id)
     gecmis_risk_skoru = float(tanim.__dict__.get("gecmis_risk_skoru") or 0.0) if tanim else 0.0
@@ -441,6 +565,10 @@ def brm_log_analiz(req: BrmLogAnalizRequest):
     kararlar = brain.run_full_decision_cycle(atm_listesi=[req.atm_id])
 
     if not kararlar:
+        _log_hafiza_kaydet("brm")
+        brain.hafiza_kaydet(
+            f"BRM log (hatasız) — ATM {req.atm_id} — {ogrenme_sayisi} kayıt"
+        )
         return {
             "terminal_id":        req.atm_id,
             "eylem":              "IZLE",
@@ -460,7 +588,447 @@ def brm_log_analiz(req: BrmLogAnalizRequest):
     result["affected_modules"]  = affected_modules
     result["ogrenme_sayisi"]    = ogrenme_sayisi
     result["gecmis_risk_skoru"] = gecmis_risk_skoru
+
+    # ── Kalıcı öğrenme: beyin hafızasını + log geçmişini diske kaydet ────────
+    _log_hafiza_kaydet("brm")
+    brain.hafiza_kaydet(
+        f"BRM log analizi — ATM {req.atm_id} — {req.log_date or 'tarih yok'} "
+        f"— {ogrenme_sayisi} birikimli kayıt"
+    )
+    result["ogrenme_sayisi"] = ogrenme_sayisi
     return result
+
+
+@app.post(
+    "/api/v1/idc-log-analiz",
+    tags=["Feed — Arıza Tarafı"],
+    summary="IDC Log Analizi — Kart okuyucu logunu beyne besle",
+    status_code=status.HTTP_200_OK,
+)
+def idc_log_analiz(req: IdcLogAnalizRequest):
+    """
+    Frontend IDC log parser'ın ürettiği JSON'u alır, kart okuyucu
+    anomalilerini beyne besler ve `ATMBrainOrchestrator`'ın kararını döner.
+
+    IDC (Integrated Card Reader) özel eşlemeleri:
+    - CRITICAL / HIGH cancel oranı, yavaş okuma → CARD_READER_MAJOR (SLM)
+    - Temizlik gerektiren yavaş okuma, düşük cancel → CARD_READER_MINOR (FLM)
+    - Kart yutma → CARD_READER_MAJOR (SLM — acil)
+    """
+    brain = get_brain()
+
+    # ── Önceki arızaları temizle (taze analiz) ───────────────────────────────
+    if req.atm_id in brain._aktif_arizalar:
+        del brain._aktif_arizalar[req.atm_id]
+
+    # ── Hataları arıza feed'ine dönüştür ─────────────────────────────────────
+    ariza_feed = []
+    affected_modules: list = []
+    seen_modules: set = set()
+
+    if req.errors:
+        for e in req.errors:
+            ts_raw = e.get("timestamp")
+            try:
+                ts = datetime.fromisoformat(str(ts_raw)).isoformat() if ts_raw else datetime.now().isoformat()
+            except Exception:
+                ts = datetime.now().isoformat()
+
+            service_type = str(e.get("service_type", "FLM")).upper()
+            error_code   = str(e.get("error_code", "IDC_UNKNOWN"))
+            description  = str(e.get("description", "")).strip()
+
+            # IDC SLM keyword: CARD_READER_MAJOR → beyin SLM_VENDOR kararı verir
+            # IDC FLM keyword: CARD_READER_MINOR → beyin FLM_VENDOR kararı verir
+            if service_type == "SLM":
+                ariza_kodu = f"CARD_READER_MAJOR IDC_{error_code}"
+            else:
+                ariza_kodu = f"CARD_READER_MINOR IDC_{error_code}"
+
+            ariza_feed.append({
+                "terminal_id": req.atm_id,
+                "tarih":       ts,
+                "ariza_kodu":  ariza_kodu,
+                "aciklama":    f"IDC {error_code}: {description}",
+                "durum":       "ACIK",
+                "sure_dk":     0,
+                "vendor_log":  f"IDC [{error_code}]",
+            })
+
+            module = str(e.get("module", "")).strip()
+            if module and module not in seen_modules:
+                seen_modules.add(module)
+                affected_modules.append(module)
+
+    # ATM tanım profili oluştur (ilk kez geliyorsa)
+    if req.atm_id not in brain._terminal_tanim:
+        brain.ingest_terminal_tanim([{"terminal_id": req.atm_id}])
+
+    # Aktif arızaları besle
+    if ariza_feed:
+        brain.ingest_ariza_feed(ariza_feed)
+
+    # Kümülatif öğrenme (BRM ile aynı mantık)
+    if req.atm_id not in _idc_kumulatif:
+        _idc_kumulatif[req.atm_id] = []
+    _idc_kumulatif[req.atm_id].extend(ariza_feed)
+    if len(_idc_kumulatif[req.atm_id]) > 500:
+        _idc_kumulatif[req.atm_id] = _idc_kumulatif[req.atm_id][-500:]
+
+    if _idc_kumulatif[req.atm_id]:
+        brain.ingest_gecmis_ariza(_idc_kumulatif[req.atm_id])
+
+    ogrenme_sayisi = len(_idc_kumulatif[req.atm_id])
+    logger.info(
+        f"[IDC ÖĞRENME] ATM {req.atm_id}: {ogrenme_sayisi} kayıt "
+        f"(bu log: {len(ariza_feed)} hata)"
+    )
+
+    tanim = brain._terminal_tanim.get(req.atm_id)
+    gecmis_risk_skoru = float(tanim.__dict__.get("gecmis_risk_skoru") or 0.0) if tanim else 0.0
+
+    # Karar döngüsü
+    kararlar = brain.run_full_decision_cycle(atm_listesi=[req.atm_id])
+
+    if not kararlar:
+        _log_hafiza_kaydet("idc")
+        brain.hafiza_kaydet(
+            f"IDC log (hatasız) — ATM {req.atm_id} — {ogrenme_sayisi} kayıt"
+        )
+        return {
+            "terminal_id":        req.atm_id,
+            "eylem":              "IZLE",
+            "aciliyet":           "DUSUK",
+            "mesaj":              "Kart okuyucu kritik anomali tespit edilmedi — rutin izleme",
+            "sebepler":           [],
+            "ariza_riski":        0.0,
+            "nakit_sure_saat":    999.0,
+            "atanan_takim":       "—",
+            "kombine_isler":      [],
+            "affected_modules":   affected_modules,
+            "ogrenme_sayisi":     ogrenme_sayisi,
+            "gecmis_risk_skoru":  gecmis_risk_skoru,
+        }
+
+    result = kararlar[0].to_dict()
+    result["affected_modules"]  = affected_modules
+    result["ogrenme_sayisi"]    = ogrenme_sayisi
+    result["gecmis_risk_skoru"] = gecmis_risk_skoru
+
+    # ── Kalıcı öğrenme: beyin hafızasını + log geçmişini diske kaydet ────────
+    _log_hafiza_kaydet("idc")
+    brain.hafiza_kaydet(
+        f"IDC log analizi — ATM {req.atm_id} — {req.log_date or 'tarih yok'} "
+        f"— {ogrenme_sayisi} birikimli kayıt"
+    )
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# XFS UYGULAMA LOGU ANALİZİ  (All.txt formatı)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class XfsLogAnalizRequest(BaseModel):
+    """
+    XFS Application Log (All.txt) parser çıktısı — tek ATM için.
+    xfs_log_parser.XFSLogParser tarafından üretilen `atms[i]` objesi.
+    """
+    log_type:          str            = "XFS"
+    terminal_id:       str            = "UNKNOWN"
+    log_date:          Optional[str]  = None
+    log_start:         Optional[str]  = None
+    log_end:           Optional[str]  = None
+    health_score:      Optional[int]  = None
+    server:            str            = ""
+    total_rows:        int            = 0
+    total_sessions:    int            = 0
+    # IDC
+    idc_read_ok:       int            = 0
+    idc_read_cancel:   int            = 0
+    idc_read_error:    int            = 0
+    idc_hw_error:      int            = 0
+    idc_retain:        int            = 0
+    idc_offline:       bool           = False
+    idc_cancel_rate:   float          = 0.0
+    # PIN
+    pin_get_ok:        int            = 0
+    pin_get_cancel:    int            = 0
+    pin_get_error:     int            = 0
+    pin_cancel_rate:   float          = 0.0
+    # Cash
+    cashin_ok:         int            = 0
+    cashin_error:      int            = 0
+    dispense_ok:       int            = 0
+    dispense_error:    int            = 0
+    # Yazıcı
+    print_ok:          int            = 0
+    print_error:       int            = 0
+    # Host
+    host_req:          int            = 0
+    host_resp_ok:      int            = 0
+    host_resp_error:   int            = 0
+    # Gecikme
+    avg_latency_sec:   float          = 0.0
+    max_latency_sec:   float          = 0.0
+    latency_warn_cnt:  int            = 0
+    latency_crit_cnt:  int            = 0
+    # Hatalar + özet
+    errors:            List[Dict]     = []
+    sorunlar:          List[str]      = []
+    beyin_oneri:       Dict           = {}
+
+
+class XfsBatchAnalizRequest(BaseModel):
+    """Birden fazla ATM'nin XFS logunu aynı anda gönder (All.txt → tüm ATM'ler)."""
+    atms: List[XfsLogAnalizRequest] = []
+
+
+@app.post(
+    "/api/v1/xfs-log-analiz",
+    tags=["Feed — Arıza Tarafı"],
+    summary="XFS Log Analizi (tekil ATM) — uygulama logunu beyne besle",
+    status_code=status.HTTP_200_OK,
+)
+def xfs_log_analiz(req: XfsLogAnalizRequest):
+    """
+    XFS uygulama logu parser çıktısını (tek ATM) alır, kart okuyucu /
+    PIN pad / dispenser / host anomalilerini beyne besler ve karar döner.
+
+    Servis tipi eşlemeleri:
+    - IDC donanım hatası, dispenser/cashin hatası → SLM (vendor)
+    - PIN pad, yazıcı, gecikme hatası            → FLM (first-line)
+    - Host iletişim hatası                        → SLM
+    """
+    brain = get_brain()
+    _log_hafiza_yukle()
+
+    atm_id = req.terminal_id.strip()
+    if not atm_id:
+        return {"hata": "terminal_id boş olamaz"}
+
+    # Önceki arızaları temizle
+    if atm_id in brain._aktif_arizalar:
+        del brain._aktif_arizalar[atm_id]
+
+    # ── Hataları arıza feed'ine dönüştür ─────────────────────────────────────
+    ariza_feed: List[Dict] = []
+    affected_modules: List[str] = []
+    seen_modules: set = set()
+
+    for e in (req.errors or []):
+        ts_raw = e.get("timestamp")
+        try:
+            ts = datetime.fromisoformat(str(ts_raw)).isoformat() if ts_raw else datetime.now().isoformat()
+        except Exception:
+            ts = datetime.now().isoformat()
+
+        service_type = str(e.get("service_type", "FLM")).upper()
+        error_code   = str(e.get("error_code",   "XFS_UNKNOWN"))
+        description  = str(e.get("description",  "")).strip()
+        count        = int(e.get("count", 1))
+
+        is_slm = (
+            service_type == "SLM" or
+            error_code.startswith("IDC_HW") or
+            error_code.startswith("DISPENSE") or
+            error_code.startswith("CASHIN") or
+            error_code.startswith("HOST") or
+            req.idc_offline
+        )
+
+        ariza_kodu = (
+            f"CARD_READER_MAJOR XFS_{error_code}" if is_slm
+            else f"CARD_READER_MINOR XFS_{error_code}"
+        )
+
+        # Tekrarlanan hatayı ağırlıklı say (max 5 kopya)
+        for _ in range(min(count, 5)):
+            ariza_feed.append({
+                "terminal_id": atm_id,
+                "tarih":       ts,
+                "ariza_kodu":  ariza_kodu,
+                "aciklama":    f"XFS {error_code}: {description}",
+                "durum":       "ACIK",
+                "sure_dk":     0,
+                "vendor_log":  f"XFS [{error_code}]",
+            })
+
+        module = str(e.get("module", "")).strip()
+        if module and module not in seen_modules:
+            seen_modules.add(module)
+            affected_modules.append(module)
+
+    # IDC offline → ek kritik kayıt
+    if req.idc_offline:
+        ariza_feed.append({
+            "terminal_id": atm_id,
+            "tarih":       datetime.now().isoformat(),
+            "ariza_kodu":  "CARD_READER_MAJOR XFS_IDC_OFFLINE",
+            "aciklama":    "Kart okuyucu offline (XFS fwDevice=Offline)",
+            "durum":       "ACIK",
+            "sure_dk":     0,
+            "vendor_log":  "XFS [IDC_OFFLINE]",
+        })
+
+    # ATM tanım profili yoksa oluştur
+    if atm_id not in brain._terminal_tanim:
+        brain.ingest_terminal_tanim([{"terminal_id": atm_id}])
+
+    if ariza_feed:
+        brain.ingest_ariza_feed(ariza_feed)
+
+    # ── Kümülatif öğrenme ────────────────────────────────────────────────────
+    if atm_id not in _xfs_kumulatif:
+        _xfs_kumulatif[atm_id] = []
+    _xfs_kumulatif[atm_id].extend(ariza_feed)
+    if len(_xfs_kumulatif[atm_id]) > 1000:
+        _xfs_kumulatif[atm_id] = _xfs_kumulatif[atm_id][-1000:]
+
+    if _xfs_kumulatif[atm_id]:
+        brain.ingest_gecmis_ariza(_xfs_kumulatif[atm_id])
+
+    ogrenme_sayisi = len(_xfs_kumulatif[atm_id])
+    logger.info(
+        f"[XFS ÖĞRENME] ATM {atm_id}: {ogrenme_sayisi} kayıt "
+        f"(bu log: {len(ariza_feed)} hata, sağlık: {req.health_score})"
+    )
+
+    tanim = brain._terminal_tanim.get(atm_id)
+    gecmis_risk_skoru = float(tanim.__dict__.get("gecmis_risk_skoru") or 0.0) if tanim else 0.0
+
+    # ── Karar döngüsü ─────────────────────────────────────────────────────────
+    kararlar = brain.run_full_decision_cycle(atm_listesi=[atm_id])
+
+    if not kararlar:
+        _log_hafiza_kaydet("xfs")
+        brain.hafiza_kaydet(
+            f"XFS log (hatasız) — ATM {atm_id} — {ogrenme_sayisi} kayıt"
+        )
+        return {
+            "terminal_id":       atm_id,
+            "eylem":             "IZLE",
+            "aciliyet":          "DUSUK",
+            "mesaj":             "XFS log kritik anomali yok — rutin izleme",
+            "sebepler":          req.sorunlar or [],
+            "ariza_riski":       0.0,
+            "nakit_sure_saat":   999.0,
+            "atanan_takim":      "—",
+            "kombine_isler":     [],
+            "affected_modules":  affected_modules,
+            "ogrenme_sayisi":    ogrenme_sayisi,
+            "gecmis_risk_skoru": gecmis_risk_skoru,
+            "health_score":      req.health_score,
+        }
+
+    result = kararlar[0].to_dict()
+    result["affected_modules"]  = affected_modules
+    result["ogrenme_sayisi"]    = ogrenme_sayisi
+    result["gecmis_risk_skoru"] = gecmis_risk_skoru
+    result["health_score"]      = req.health_score
+
+    _log_hafiza_kaydet("xfs")
+    brain.hafiza_kaydet(
+        f"XFS log analizi — ATM {atm_id} — {req.log_date or 'tarih yok'} "
+        f"— {ogrenme_sayisi} birikimli kayıt"
+    )
+    return result
+
+
+@app.post(
+    "/api/v1/xfs-log-analiz-toplu",
+    tags=["Feed — Arıza Tarafı"],
+    summary="XFS Log Analizi (toplu) — All.txt içindeki tüm ATM'leri beyne besle",
+    status_code=status.HTTP_200_OK,
+)
+def xfs_log_analiz_toplu(req: XfsBatchAnalizRequest):
+    """
+    All.txt parse edildikten sonra tüm ATM'lerin sonuçlarını tek seferde gönderir.
+    Her ATM için `xfs_log_analiz` mantığı çalıştırılır ve toplu özet döner.
+    """
+    sonuclar = []
+    for atm_req in req.atms:
+        try:
+            sonuc = xfs_log_analiz(atm_req)
+            sonuclar.append({
+                "terminal_id":  atm_req.terminal_id,
+                "eylem":        sonuc.get("eylem", "IZLE"),
+                "aciliyet":     sonuc.get("aciliyet", "DUSUK"),
+                "health_score": atm_req.health_score,
+                "ogrenme":      sonuc.get("ogrenme_sayisi", 0),
+            })
+        except Exception as ex:
+            sonuclar.append({
+                "terminal_id": atm_req.terminal_id,
+                "hata":        str(ex),
+            })
+
+    kritik = sum(1 for s in sonuclar if s.get("aciliyet") == "KRITIK")
+    yuksek = sum(1 for s in sonuclar if s.get("aciliyet") == "YUKSEK")
+    return {
+        "islenen_atm":   len(sonuclar),
+        "kritik_sayisi": kritik,
+        "yuksek_sayisi": yuksek,
+        "sonuclar":      sonuclar,
+    }
+
+
+class XfsRawLogRequest(BaseModel):
+    """Ham XFS log metni (All.txt içeriği string olarak)."""
+    raw_log:    str            = ""
+    atm_filter: Optional[str] = None   # Sadece belirli ATM'yi filtrele
+
+
+@app.post(
+    "/api/v1/xfs-log-raw",
+    tags=["Feed — Arıza Tarafı"],
+    summary="XFS Ham Log Metni — All.txt içeriğini doğrudan beyne gönder",
+    status_code=status.HTTP_200_OK,
+)
+def xfs_log_raw(req: XfsRawLogRequest):
+    """
+    All.txt dosya içeriğini raw string olarak alır, XFSLogParser ile parse eder
+    ve tüm ATM'leri otomatik olarak beyne besler.
+
+    Frontend'den şu şekilde çağrılır:
+        POST /api/v1/xfs-log-raw
+        { "raw_log": "<dosya içeriği>", "atm_filter": null }
+    """
+    import sys, os
+    # xfs_log_parser modülünü dinamik import et
+    _dir = os.path.dirname(os.path.abspath(__file__))
+    if _dir not in sys.path:
+        sys.path.insert(0, _dir)
+
+    try:
+        from xfs_log_parser import XFSLogParser
+    except ImportError as ie:
+        raise HTTPException(
+            status_code=500,
+            detail=f"xfs_log_parser modülü bulunamadı: {ie}"
+        )
+
+    if not req.raw_log.strip():
+        return {"islenen_atm": 0, "mesaj": "Log metni boş"}
+
+    parser  = XFSLogParser()
+    result  = parser.parse_text(req.raw_log, atm_filter=req.atm_filter)
+
+    atm_requests = [XfsLogAnalizRequest(**atm) for atm in result.get("atms", [])]
+    batch_req    = XfsBatchAnalizRequest(atms=atm_requests)
+    batch_result = xfs_log_analiz_toplu(batch_req)
+
+    # Beyin kararlarını tam ATM verisine göm (frontend için)
+    brain_by_atm = {s.get("terminal_id"): s for s in batch_result.get("sonuclar", [])}
+    full_atms = result.get("atms", [])
+    for atm in full_atms:
+        atm["brain"] = brain_by_atm.get(atm["terminal_id"], {})
+
+    batch_result["parsed_rows"]  = result.get("parsed_rows", 0)
+    batch_result["skipped_rows"] = result.get("skipped_rows", 0)
+    batch_result["atm_count"]    = result.get("atm_count", 0)
+    batch_result["log_type"]     = "XFS"
+    batch_result["atms"]         = full_atms
+    return batch_result
 
 
 # ── Karar Endpoint'leri ─────────────────────────────────────────────────────
@@ -728,13 +1296,11 @@ def manuel_kural_ogret(req: ManuelKuralRequest):
 
     # ── 1) FLM eşiği override ───────────────────────────────────────────────
     if req.flm_esik_saat is not None and req.flm_esik_saat > 0:
-        from atm_brain_orchestrator import BusinessRules
         BusinessRules.FLM_ESIK_SAAT = req.flm_esik_saat
         degisiklikler.append(f"FLM eşiği → {req.flm_esik_saat:.1f} saat")
 
     # ── 2) SLM risk eşiği override ──────────────────────────────────────────
     if req.slm_risk_yuzde is not None and 0 < req.slm_risk_yuzde <= 100:
-        from atm_brain_orchestrator import BusinessRules
         BusinessRules.SLM_RISK_ESIK = req.slm_risk_yuzde / 100.0
         degisiklikler.append(f"SLM risk eşiği → %{req.slm_risk_yuzde:.0f}")
 
@@ -869,7 +1435,7 @@ def demo_yukle():
         master_path = Path(__file__).parent.parent / "src" / "data" / "atm_master.json"
         with open(master_path, encoding="utf-8") as f:
             master = json.load(f)
-        brain.ingest_terminal_tanim(master[:100])
+        brain.ingest_terminal_tanim(master)  # Tüm ATM'ler — all_in_capacity dahil
         terminal_sayisi = len(brain._terminal_tanim)
     except Exception as e:
         terminal_sayisi = 0
@@ -1011,6 +1577,189 @@ def format_rehberi():
             }
         }
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BÖLÜM X: AKILLI SÜREKLİ FILL VELOCITY İZLEME
+# ─ Eski kural: "Gece 23:00'de yatırma oranı ≥%80 olan ATM'lere kayıt aç"
+#   YENİ sistem: Her 30 dakikada fill velocity hesapla → "Ne zaman taşar?" sorusunu sor
+#   Cevap: "Planlı servis gelmeden taşacaksa → ŞIMDI kayıt aç" (saat bağımsız)
+# ═══════════════════════════════════════════════════════════════════════════
+
+_otomatik_toplama_log: List[Dict] = []   # Tetiklenen kayıtların geçmişi
+
+
+def _otomatik_toplama_kontrol_et(brain: ATMBrainOrchestrator) -> Dict:
+    """
+    Fill velocity bazlı akıllı toplama kontrolü — saat bağımsız, her 30 dakikada çalışır.
+
+    Eski yaklaşım: Gece 23:00'de yatırma oranı ≥%80 ise kayıt aç.
+    Yeni yaklaşım:
+      1. Her ATM için fill velocity hesapla (TL/saat)
+      2. Overflow zamanını tahmin et (kaç saat sonra all-in kaset dolar?)
+      3. Bu ATM'nin planlı servis ziyaretine kaç gün var?
+      4. Overflow < servis_süresi + güvenlik_tamponu → ŞİMDİ kayıt aç
+
+    Artı: Yatırma oranı ≥%80 iken fill velocity bilgisi yoksa fallback olarak
+    eski oran eşiği de devrede kalır (geriye dönük uyumluluk).
+    """
+    simdi         = datetime.now()
+    tetiklenenler = []
+
+    for tid, bakiye in brain._son_bakiye.items():
+        try:
+            if bakiye.yatan_para <= 0 or bakiye.tl_bakiye <= 0:
+                continue
+
+            toplam        = bakiye.yatan_para + bakiye.tl_bakiye
+            yatirma_orani = bakiye.yatan_para / toplam if toplam > 0 else 0.0
+
+            # ── Yol 1: Fill velocity bazlı tahminsel kontrol ────────────────
+            tanim        = brain._terminal_tanim.get(tid)
+            atm_modeli   = getattr(tanim, 'atm_modeli', '') or '' if tanim else ''
+            overflow_saat = brain._overflow_tahmin_et(tid, bakiye, atm_modeli)
+            fill_hizi     = brain._fill_hizi_hesapla(tid)
+
+            tetiklendi        = False
+            tetikleme_nedeni  = ''
+
+            if overflow_saat is not None:
+                servis_gun  = brain._sonraki_servis_gun_hesapla(tid, simdi)
+                servis_saat = servis_gun * 24.0 + BusinessRules.OVERFLOW_GUVENLIK_TAMPONU_SAAT
+                if overflow_saat <= servis_saat:
+                    tetiklendi       = True
+                    tetikleme_nedeni = (
+                        f"🔮 Fill velocity: {fill_hizi:,.0f} TL/saat → "
+                        f"~{overflow_saat:.0f} saatte taşar, "
+                        f"servis {servis_gun:.0f} gün sonra"
+                    )
+
+            # ── Yol 2: Fallback — fill verisi yoksa oran eşiği kontrolü ────
+            if not tetiklendi and BusinessRules.otomatik_toplama_acilmali_mi(yatirma_orani):
+                tetiklendi       = True
+                tetikleme_nedeni = (
+                    f"📊 Fallback oran kontrolü: Yatırma oranı %{yatirma_orani*100:.0f} "
+                    f"(eşik %{BusinessRules.OTOMATIK_TOPLAMA_YATIRMA_ORAN_ESIK*100:.0f}) "
+                    f"— fill velocity verisi yok"
+                )
+
+            if tetiklendi:
+                # Zaten açık toplama kararı var mı?
+                mevcut_karar = next(
+                    (k for k in brain._karar_gecmisi
+                     if k.terminal_id == tid and k.eylem == 'PARA_TOPLAMA'),
+                    None
+                )
+                if mevcut_karar is None:
+                    karar = BeyinKarari(
+                        terminal_id      = tid,
+                        zaman            = simdi.isoformat(),
+                        eylem            = 'PARA_TOPLAMA',
+                        aciliyet         = 'YUKSEK' if (overflow_saat or 99) <= 12 else 'ORTA',
+                        atanan_takim     = 'Bantaş_CIT',
+                        tahmini_maliyet  = BusinessRules.MALIYET_TOPLAMA_PLANLI,
+                        tahmini_tasarruf = 0.0,
+                        sebepler         = [tetikleme_nedeni],
+                    )
+                    brain._karar_gecmisi.append(karar)
+                    tetiklenenler.append({
+                        "terminal_id"         : tid,
+                        "yatirma_orani"       : round(yatirma_orani, 3),
+                        "yatan_para"          : bakiye.yatan_para,
+                        "fill_hizi_tl_saat"   : round(fill_hizi, 0) if fill_hizi else None,
+                        "overflow_tahmin_saat": round(overflow_saat, 1) if overflow_saat is not None else None,
+                        "sonraki_servis_gun"  : brain._sonraki_servis_gun_hesapla(tid, simdi),
+                        "tetikleme_nedeni"    : tetikleme_nedeni,
+                        "zaman"               : simdi.isoformat(),
+                    })
+        except Exception as e:
+            logger.warning(f"Fill velocity kontrol hatası [{tid}]: {e}")
+
+    sonuc = {
+        "zaman"             : simdi.isoformat(),
+        "kontrol_saati"     : simdi.hour,
+        "kontrol_dakika"    : simdi.minute,
+        "tetiklenen_atm"    : len(tetiklenenler),
+        "izlenen_atm_toplam": len(brain._son_bakiye),
+        "detaylar"          : tetiklenenler,
+    }
+    _otomatik_toplama_log.append(sonuc)
+    if tetiklenenler:
+        logger.info(f"🔄 Fill velocity izleme: {len(tetiklenenler)} ATM için toplama kararı üretildi")
+    return sonuc
+
+
+@app.post(
+    "/api/v1/otomatik-toplama-tetikle",
+    tags=["Operasyon"],
+    summary="Fill Velocity Kontrolünü Manuel Tetikle",
+)
+def otomatik_toplama_tetikle():
+    """
+    Fill velocity bazlı akıllı toplama kontrolü — saat bağımsız.
+    (Eski adıyla: 23:00 otomatik toplama. Artık her an çalışabilir.)
+
+    Tüm ATM'lerin yatırma hızını hesaplar, overflow tahmin eder.
+    Planlı servis gelmeden taşacak ATM'lere anında PARA_TOPLAMA kararı açar.
+    """
+    brain = get_brain()
+    sonuc = _otomatik_toplama_kontrol_et(brain)
+    return sonuc
+
+
+@app.get(
+    "/api/v1/otomatik-toplama-log",
+    tags=["Operasyon"],
+    summary="Fill Velocity İzleme Geçmişi",
+)
+def otomatik_toplama_log():
+    """
+    Son 100 fill velocity kontrol kaydını döner.
+    Her kayıtta: overflow tahmin süresi, fill hızı, planlı servis günü bilgisi.
+    """
+    return {
+        "toplam_kontrol": len(_otomatik_toplama_log),
+        "son_kontroller": _otomatik_toplama_log[-100:],
+    }
+
+
+async def _surekli_izleme_scheduler():
+    """
+    Her 30 dakikada bir fill velocity analizini çalıştırır.
+
+    Eski kural: "Gece 23:00'de tetikle" — KALDIRILDI
+    Yeni kural: "Her 30 dakikada tüm ATM'lerin fill velocity'sini hesapla →
+                 Planlı servis gelmeden taşacak olanlar için şimdi kayıt aç"
+
+    Bu yaklaşımın avantajları:
+    ─ Sabah 08:00'de gelen yoğun yatırma dalgasını saat 23:00'ı beklemeden yakalar
+    ─ Düşük trafikli ATM'leri yanlışlıkla tetiklemez (fill hızı hesaplanır)
+    ─ Bayram öncesi, maaş dönemi → bakiye feed hızlandıkça sistem otomatik uyarır
+    ─ Fallback olarak %80 oran eşiği de devrede (fill verisi yetersizse)
+    """
+    IZLEME_ARALIK_SNY = 1800  # 30 dakika
+    logger.info("🔄 Sürekli fill velocity izleme scheduler başlatıldı (30dk aralık, saat bağımsız)")
+    await asyncio.sleep(90)   # Server başlangıcında 90s bekle (veri dolmadan kontrol etme)
+    while True:
+        try:
+            brain = get_brain()
+            sonuc = _otomatik_toplama_kontrol_et(brain)
+            adet  = sonuc.get('tetiklenen_atm', 0)
+            izlenen = sonuc.get('izlenen_atm_toplam', 0)
+            if adet > 0:
+                logger.info(f"🔄 Fill velocity izleme ({izlenen} ATM): {adet} ATM için toplama kararı üretildi")
+            else:
+                logger.debug(f"🔄 Fill velocity izleme ({izlenen} ATM): Kritik ATM yok")
+        except Exception as e:
+            logger.error(f"Sürekli izleme scheduler hatası: {e}")
+        await asyncio.sleep(IZLEME_ARALIK_SNY)
+
+
+@app.on_event("startup")
+async def startup_scheduler():
+    """Server başladığında sürekli fill velocity izleme scheduler'ını başlat."""
+    asyncio.create_task(_surekli_izleme_scheduler())
+    logger.info("✅ Sürekli fill velocity izleme aktif — 30dk aralık, saat bağımsız")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

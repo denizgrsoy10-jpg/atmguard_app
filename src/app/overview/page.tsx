@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
+import * as XLSX from 'xlsx';
 import KpiRow from "@/components/KpiRow";
 import OverviewBottomStrip from "@/components/OverviewBottomStrip";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -345,6 +346,8 @@ export default function OverviewPage() {
   const [brmLogData, setBrmLogData] = useState<any>(null);
   const [brmLogError, setBrmLogError] = useState<string | null>(null);
   const brmFileRef = useRef<HTMLInputElement>(null);
+  const [showBrmEmailModal, setShowBrmEmailModal] = useState(false);
+  const [brmEmailAddress, setBrmEmailAddress] = useState('');
 
   // Top 10 Risky ATMs tarih aralığı
   const [top10StartDate, setTop10StartDate] = useState(() => {
@@ -496,10 +499,37 @@ export default function OverviewPage() {
     setBrmLogError(null);
     setVendorLogSimulated(false);
     setBrmLogData(null);
-    const fd = new FormData();
-    fd.append('file', file);
+
+    // ── Format tespiti ──────────────────────────────────────────────────────
+    // 1) XFS: tab-ayrımlı 17 kolon, kolon[3]'te "YYYY-MM-DD HH:MM" timestamp
+    //    Tipik dosya adı: All.txt veya idc_..._All.txt
+    // 2) IDC: WFS_CMD_IDC_ komutları içeriyor VEYA dosya adı IDC ile başlıyor
+    // 3) BRM: diğerleri (GRG/Hyosung nakit ünitesi logu)
+    let logFormat: 'XFS' | 'IDC' | 'BRM' = 'BRM';
     try {
-      const res = await fetch('/api/brm-log', { method: 'POST', body: fd });
+      const chunk = await file.slice(0, 2048).text();
+      const firstDataLine = chunk.split('\n').find(l => l.trim().length > 20) || '';
+      const cols = firstDataLine.split('\t');
+      // XFS: 15+ sekme ayrımlı kolon + kolon[3]'te tarih + kolon[5]'te sayısal mesaj tipi
+      const isXFS = cols.length >= 15
+        && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(cols[3] ?? '')
+        && /^\d+$/.test((cols[5] ?? '').trim());
+      if (isXFS) {
+        logFormat = 'XFS';
+      } else if (chunk.includes('WFS_CMD_IDC_') || /^idc/i.test(file.name)) {
+        logFormat = 'IDC';
+      }
+    } catch { /* fallback: BRM */ }
+
+    let endpoint = '/api/brm-log';
+    let fieldName = 'file';
+    if (logFormat === 'XFS') { endpoint = '/api/xfs-log'; fieldName = 'log_file'; }
+    else if (logFormat === 'IDC') { endpoint = '/api/idc-log'; fieldName = 'log_file'; }
+
+    const fd = new FormData();
+    fd.append(fieldName, file);
+    try {
+      const res = await fetch(endpoint, { method: 'POST', body: fd });
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || 'Analiz başarısız');
       setBrmLogData(data);
@@ -512,6 +542,21 @@ export default function OverviewPage() {
       setVendorLogLoading(false);
     }
   };
+
+  // ── XFS Log — normalize (All.txt / uygulama logu) ────────────────────────
+  const xfsLog = (brmLogData && brmLogData.log_type === 'XFS') ? (() => {
+    const atms: any[] = [...(brmLogData.atms || [])];
+    atms.sort((a: any, b: any) => (a.health_score ?? 100) - (b.health_score ?? 100));
+    const worst = atms[0] ?? null;
+    return {
+      atms,
+      worst,
+      source_file:   brmLogData.source_file,
+      parsed_rows:   brmLogData.parsed_rows   ?? 0,
+      kritik_sayisi: brmLogData.kritik_sayisi ?? 0,
+      yuksek_sayisi: brmLogData.yuksek_sayisi ?? 0,
+    };
+  })() : null;
 
   // Normalize parser output → UI shape (same field names as old BRM_DEMO_LOG)
   const brmLog = brmLogData ? (() => {
@@ -582,6 +627,36 @@ export default function OverviewPage() {
     if (brmLog.net_flow_try > 0) faults.push({ id:'CASH_OVERFLOW', severity:'medium', icon:'💰', title:'Nakit Taşma Riski', count:0, pattern:`Net akış: +₺${(brmLog.net_flow_try/1000).toFixed(0)}K`, impact:`ATM'ye ₺${(brmLog.total_cashin_try/1000).toFixed(0)}K girdi, ₺${(brmLog.total_dispense_try/1000).toFixed(0)}K çıktı.`, action:'Yakın vadede toplama operasyonu planlanmalı', urgency:55 });
     return faults;
   })() : [];
+
+  // ── IDC Log — normalized view (kart okuyucu) ──────────────────────────────
+  const idcLog = (brmLogData && brmLogData.log_type === 'IDC') ? (() => {
+    const d = brmLogData;
+    // health badge
+    const hs = d.health_score ?? 100;
+    const hsBadge = hs >= 80 ? '🟢' : hs >= 50 ? '🟡' : '🔴';
+    // FLM / SLM partition from errors
+    const slmErrors = (d.errors || []).filter((e: any) => e.service_type === 'SLM');
+    const flmErrors = (d.errors || []).filter((e: any) => e.service_type === 'FLM');
+    const topSLM = slmErrors[0];
+    const verdict: 'SLM' | 'FLM' | 'OK' =
+      slmErrors.length > 0 ? 'SLM' :
+      flmErrors.length > 0 ? 'FLM' : 'OK';
+    // session table rows (top 50)
+    const sessions = (d.card_sessions || []).slice(0, 50).map((s: any) => {
+      const label = s.duration_label;
+      const statusBadge = s.status === 'ok' ? { text: '✓ OK', cls: 'text-[#10B981] bg-[#10B981]/10' } : { text: '✕ İptal', cls: 'text-[#EF4444] bg-[#EF4444]/10' };
+      const speedBadge =
+        label === 'critical'  ? { text: 'KRİTİK',  cls: 'text-[#EF4444] bg-[#EF4444]/10' } :
+        label === 'very_slow' ? { text: 'ÇOK YAVIŞ', cls: 'text-[#F97316] bg-[#F97316]/10' } :
+        label === 'slow'      ? { text: 'YAVIŞ',    cls: 'text-[#F2B705] bg-[#F2B705]/10' } :
+                                { text: 'Normal',   cls: 'text-[#A7B8D8] bg-[#A7B8D8]/10' };
+      const dur = s.duration_sec;
+      const durStr = dur < 60 ? `${dur.toFixed(0)} sn` : `${Math.floor(dur/60)} dk ${Math.round(dur%60)} sn`;
+      const timeStr = s.start ? String(s.start).substring(11,16) : '--:--';
+      return { timeStr, durStr, statusBadge, speedBadge, chipIo: s.chip_io_count ?? 0 };
+    });
+    return { hs, hsBadge, verdict, slmErrors, flmErrors, topSLM, sessions, d };
+  })() : null;
 
   return (
     <div className="space-y-4">
@@ -908,6 +983,7 @@ export default function OverviewPage() {
                         <option value="ikmal">🟢 İkmal Geçmişi</option>
                         <option value="para_toplama">🟡 Para Toplama Geçmişi</option>
                         <option value="gunluk_bakiye">🔵 Günlük Bakiye / Nakit Seviyesi</option>
+                        <option value="xfs_log">🖥️ XFS Uygulama Logu (All.txt)</option>
                       </select>
                     </div>
                     <div>
@@ -1116,6 +1192,7 @@ export default function OverviewPage() {
                                 {h.veri_turu === 'ariza_log'      ? '🔴 Arıza Log'
                                 : h.veri_turu === 'ikmal'         ? '🟢 İkmal'
                                 : h.veri_turu === 'para_toplama'  ? '🟡 Para Toplama'
+                                : h.veri_turu === 'xfs_log'       ? '🖥️ XFS Log'
                                 : '🔵 Günlük Bakiye'}
                                 {' — '}{h.tarih}
                               </div>
@@ -1430,38 +1507,202 @@ export default function OverviewPage() {
           {/* Loading */}
           {vendorLogLoading && (
             <div className="flex flex-col items-center justify-center py-10 gap-4">
-              <div className="w-14 h-14 rounded-full bg-[#F2B705]/20 ring-2 ring-[#F2B705]/60 flex items-center justify-center text-3xl animate-spin">🧠</div>
+              <div className="relative">
+                <img
+                  src="/atm-mascot-new.png"
+                  alt="ATM Maskot"
+                  className="w-24 h-24 object-contain drop-shadow-lg"
+                  style={{ animation: 'mascotBounce 0.8s ease-in-out infinite alternate' }}
+                />
+                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-16 h-2 bg-[#F2B705]/30 rounded-full blur-sm" style={{ animation: 'mascotShadow 0.8s ease-in-out infinite alternate' }} />
+                <style>{`
+                  @keyframes mascotBounce { from { transform: translateY(0px); } to { transform: translateY(-8px); } }
+                  @keyframes mascotShadow { from { transform: translateX(-50%) scaleX(1); opacity:0.4; } to { transform: translateX(-50%) scaleX(0.7); opacity:0.15; } }
+                `}</style>
+              </div>
               <div className="text-center">
-                <div className="text-sm font-bold text-white">AI Beyin BRM Logu İşliyor...</div>
-                <div className="text-xs text-[#A7B8D8] mt-1">BRM log dosyası okunuyor • işlemler ayrıştırılıyor • arıza örüntüsü analizi</div>
+                <div className="text-sm font-bold text-white">Log analiz ediliyor...</div>
+                <div className="text-xs text-[#A7B8D8] mt-1">Log dosyası okunuyor • format algılanıyor • arıza örüntüsü analizi</div>
               </div>
               <div className="flex gap-1.5 flex-wrap justify-center">
-                {['BRM formatı okunuyor', 'İşlemler ayrıştırılıyor', 'Hata kodları analiz', 'Arıza tespiti'].map((step, i) => (
+                {['Format algılanıyor', 'İşlemler ayrıştırılıyor', 'Hata kodları analiz', 'Arıza tespiti'].map((step, i) => (
                   <div key={i} className="text-[10px] px-2 py-1 rounded-full bg-[#1A3050] text-[#A7B8D8] animate-pulse" style={{ animationDelay: `${i * 0.3}s` }}>{step}</div>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Results */}
-          {vendorLogSimulated && !vendorLogLoading && brmLog && (() => {
+          {/* Results — BRM (Nakit Ünitesi) */}
+          {vendorLogSimulated && !vendorLogLoading && brmLog && brmLogData?.log_type !== 'IDC' && brmLogData?.log_type !== 'XFS' && (() => {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const BRM_DEMO_LOG = brmLog as any;
             const BRM_BRAIN_FAULTS = brmFaults;
 
             // Hata kodu frekans tablosu için ham errors listesi
             const rawErrors: any[] = brmLogData?.errors || [];
-            const errorFreq: Record<string, { code: string; desc: string; count: number; severity: string }> = {};
+            const errorFreq: Record<string, { code: string; desc: string; count: number; severity: string; service_type: string; modules: string[] }> = {};
             for (const e of rawErrors) {
               if (!errorFreq[e.error_code]) {
-                errorFreq[e.error_code] = { code: e.error_code, desc: e.description, count: 0, severity: e.severity || 'medium' };
+                errorFreq[e.error_code] = { code: e.error_code, desc: e.description, count: 0, severity: e.severity || 'medium', service_type: String(e.service_type || 'FLM').toUpperCase(), modules: [] };
               }
               errorFreq[e.error_code].count++;
+              const mod = String(e.module || '').trim();
+              if (mod && !errorFreq[e.error_code].modules.includes(mod)) errorFreq[e.error_code].modules.push(mod);
             }
             const errorList = Object.values(errorFreq).sort((a, b) => b.count - a.count);
 
+            // ── Excel Export Fonksiyonu ──────────────────────────────────────
+            const exportBrmExcel = () => {
+              const wb = XLSX.utils.book_new();
+
+              // Sayfa 1: Özet
+              const ozet = [
+                ['ATM Guard — BRM Log Analiz Raporu'],
+                [],
+                ['ATM ID', BRM_DEMO_LOG.atm_id],
+                ['Log Tarihi', BRM_DEMO_LOG.log_date],
+                ['Kaynak Dosya', BRM_DEMO_LOG.source_file],
+                ['Sağlık Skoru', `${BRM_DEMO_LOG.health_score}/100`],
+                [],
+                ['Metrik', 'Değer'],
+                ['Para Yatırma İşlemi', BRM_DEMO_LOG.cashin_count],
+                ['Para Çekme İşlemi', BRM_DEMO_LOG.dispense_count],
+                ['Toplam Yatırma (₺)', BRM_DEMO_LOG.total_cashin_try],
+                ['Toplam Çekme (₺)', BRM_DEMO_LOG.total_dispense_try],
+                ['Net Akış (₺)', BRM_DEMO_LOG.net_flow_try],
+                ['Reddedilen Banknot', BRM_DEMO_LOG.total_rejected_notes],
+                ['Hata Sayısı', BRM_DEMO_LOG.error_count],
+              ];
+              const wsOzet = XLSX.utils.aoa_to_sheet(ozet);
+              wsOzet['!cols'] = [{ wch: 28 }, { wch: 30 }];
+              XLSX.utils.book_append_sheet(wb, wsOzet, 'Özet');
+
+              // Sayfa 2: Hata Kodları
+              const hatalar = [
+                ['#', 'Hata Kodu', 'Açıklama', 'Servis Tipi', 'Müdahale Bölgesi', 'Adet'],
+                ...errorList.map((e, i) => [
+                  i + 1,
+                  e.code,
+                  e.desc,
+                  e.service_type,
+                  e.modules.join(' / ') || '—',
+                  e.count,
+                ]),
+              ];
+              const wsHata = XLSX.utils.aoa_to_sheet(hatalar);
+              wsHata['!cols'] = [{ wch: 4 }, { wch: 12 }, { wch: 50 }, { wch: 10 }, { wch: 50 }, { wch: 6 }];
+              XLSX.utils.book_append_sheet(wb, wsHata, 'Hata Kodları');
+
+              // Sayfa 3: İşlem Listesi
+              const txnRows = [
+                ['Saat', 'İşlem Tipi', 'Tutar (₺)', 'Reddedilen', 'Durum', 'Hata Kodu', 'Açıklama'],
+                ...BRM_DEMO_LOG.transactions.map((t: any) => [
+                  t.ts,
+                  t.op === 'cashin' ? 'Para Yatırma' : 'Para Çekme',
+                  t.amount,
+                  t.rejected,
+                  t.ok ? 'OK' : 'HATA',
+                  t.error || '',
+                  t.errorDesc || '',
+                ]),
+              ];
+              const wsTxn = XLSX.utils.aoa_to_sheet(txnRows);
+              wsTxn['!cols'] = [{ wch: 8 }, { wch: 15 }, { wch: 12 }, { wch: 10 }, { wch: 8 }, { wch: 12 }, { wch: 50 }];
+              XLSX.utils.book_append_sheet(wb, wsTxn, 'İşlem Listesi');
+
+              XLSX.writeFile(wb, `BRM_Analiz_${BRM_DEMO_LOG.atm_id}_${BRM_DEMO_LOG.log_date || 'rapor'}.xlsx`);
+            };
+
+            // ── Email İçeriği Oluştur ─────────────────────────────────────────
+            const buildBrmEmailBody = () => {
+              const slmErrs = rawErrors.filter((e: any) => String(e.service_type || 'FLM').toUpperCase() === 'SLM');
+              const verdict = slmErrs.length > 0 ? 'SLM MÜDAHALESİ GEREKLİ' : rawErrors.length > 0 ? 'FLM MÜDAHALESİ' : 'SİSTEM NORMAL';
+              const lines = [
+                `ATM GUARD — BRM LOG ANALİZ RAPORU`,
+                `========================================`,
+                `ATM ID      : ${BRM_DEMO_LOG.atm_id}`,
+                `Log Tarihi  : ${BRM_DEMO_LOG.log_date}`,
+                `Kaynak      : ${BRM_DEMO_LOG.source_file}`,
+                `Sağlık Skoru: ${BRM_DEMO_LOG.health_score}/100`,
+                ``,
+                `── KARAR ──`,
+                `${verdict}`,
+                ``,
+                `── İŞLEM ÖZETİ ──`,
+                `Para Yatırma : ${BRM_DEMO_LOG.cashin_count} işlem  →  ₺${BRM_DEMO_LOG.total_cashin_try?.toLocaleString('tr-TR')}`,
+                `Para Çekme   : ${BRM_DEMO_LOG.dispense_count} işlem  →  ₺${BRM_DEMO_LOG.total_dispense_try?.toLocaleString('tr-TR')}`,
+                `Net Akış     : ${BRM_DEMO_LOG.net_flow_try >= 0 ? '+' : ''}₺${BRM_DEMO_LOG.net_flow_try?.toLocaleString('tr-TR')}`,
+                `Reddedilen   : ${BRM_DEMO_LOG.total_rejected_notes} banknot`,
+                `Hata Sayısı  : ${BRM_DEMO_LOG.error_count} olay`,
+                ``,
+                `── HATA KODLARI ──`,
+                ...errorList.map((e, i) =>
+                  `${i + 1}. [${e.code}] ${e.service_type} — ${e.desc} (${e.count}×)${e.modules.length ? '  →  ' + e.modules.join(', ') : ''}`
+                ),
+                ``,
+                `Rapor: ATM Health Guardian • ${new Date().toLocaleString('tr-TR')}`,
+              ];
+              return lines.join('\n');
+            };
+
             return (
               <div className="flex flex-col gap-4">
+                {/* Email Modal */}
+                {showBrmEmailModal && (
+                  <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" style={{ zIndex: 9999 }} onClick={() => setShowBrmEmailModal(false)}>
+                    <div className="bg-[#112544] rounded-2xl p-6 w-full max-w-md ring-2 ring-[#2E86FF] shadow-2xl" onClick={e => e.stopPropagation()}>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xl">📧</span>
+                          <div>
+                            <div className="text-sm font-bold text-white">BRM Raporu Gönder</div>
+                            <div className="text-[11px] text-[#A7B8D8]">ATM: {BRM_DEMO_LOG.atm_id} • {BRM_DEMO_LOG.log_date}</div>
+                          </div>
+                        </div>
+                        <button onClick={() => setShowBrmEmailModal(false)} className="text-[#A7B8D8] hover:text-white text-xl">×</button>
+                      </div>
+                      <div className="mb-4">
+                        <label className="text-xs text-[#A7B8D8] mb-1 block">Alıcı E-posta Adresi</label>
+                        <input
+                          type="email"
+                          value={brmEmailAddress}
+                          onChange={e => setBrmEmailAddress(e.target.value)}
+                          placeholder="ornek@banka.com.tr"
+                          className="w-full px-3 py-2 bg-[#0E2142] text-white text-sm rounded-lg border border-[#2B416B] focus:outline-none focus:ring-2 focus:ring-[#2E86FF]"
+                        />
+                      </div>
+                      {/* Önizleme */}
+                      <div className="mb-4">
+                        <div className="text-xs text-[#A7B8D8] mb-1">Rapor Önizleme</div>
+                        <div className="bg-[#0E2142] rounded-lg p-3 ring-1 ring-[#2B416B] max-h-48 overflow-y-auto">
+                          <pre className="text-[10px] text-[#A7B8D8] whitespace-pre-wrap font-mono leading-relaxed">{buildBrmEmailBody()}</pre>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            const subject = encodeURIComponent(`BRM Log Analiz Raporu — ATM ${BRM_DEMO_LOG.atm_id} (${BRM_DEMO_LOG.log_date})`);
+                            const body = encodeURIComponent(buildBrmEmailBody());
+                            const to = encodeURIComponent(brmEmailAddress);
+                            window.open(`mailto:${to}?subject=${subject}&body=${body}`);
+                            setShowBrmEmailModal(false);
+                          }}
+                          className="flex-1 py-2.5 bg-[#2E86FF] hover:bg-[#1E6FCC] text-white text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"
+                        >
+                          📧 Mail Gönder
+                        </button>
+                        <button
+                          onClick={() => { exportBrmExcel(); setShowBrmEmailModal(false); }}
+                          className="px-4 py-2.5 bg-[#10B981] hover:bg-[#059669] text-white text-sm font-bold rounded-lg transition flex items-center gap-2"
+                        >
+                          📊 Excel
+                        </button>
+                      </div>
+                      <div className="mt-3 text-[10px] text-[#A7B8D8] text-center">Mail gönderme varsayılan e-posta uygulamanızı açar</div>
+                    </div>
+                  </div>
+                )}
+
                 {/* ATM Info Strip */}
                 <div className="flex items-center gap-3 p-3 rounded-xl bg-[#0E2142] ring-1 ring-[#2B416B] flex-wrap">
                   <div className="text-xl">🏧</div>
@@ -1485,6 +1726,21 @@ export default function OverviewPage() {
                     <div className={`text-2xl font-black ${BRM_DEMO_LOG.health_score >= 80 ? 'text-[#10B981]' : BRM_DEMO_LOG.health_score >= 60 ? 'text-[#F2B705]' : 'text-[#FF4C4C]'}`}>{BRM_DEMO_LOG.health_score}</div>
                     <div className="text-[10px] text-[#A7B8D8]">Sağlık/100</div>
                   </div>
+                  {/* Excel + Email Butonları */}
+                  <div className="flex items-center gap-2 ml-auto shrink-0">
+                    <button
+                      onClick={exportBrmExcel}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#10B981]/15 hover:bg-[#10B981]/30 text-[#10B981] text-xs font-bold border border-[#10B981]/30 transition"
+                    >
+                      📊 Excel İndir
+                    </button>
+                    <button
+                      onClick={() => setShowBrmEmailModal(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2E86FF]/15 hover:bg-[#2E86FF]/30 text-[#2E86FF] text-xs font-bold border border-[#2E86FF]/30 transition"
+                    >
+                      📧 Mail Gönder
+                    </button>
+                  </div>
                 </div>
 
                 {/* Two-column layout: Error Freq | AI Analysis */}
@@ -1505,6 +1761,7 @@ export default function OverviewPage() {
                               <th className="px-3 py-2.5 text-left text-[#A7B8D8] font-semibold">#</th>
                               <th className="px-3 py-2.5 text-left text-[#A7B8D8] font-semibold">Hata Kodu</th>
                               <th className="px-3 py-2.5 text-left text-[#A7B8D8] font-semibold">Açıklama</th>
+                              <th className="px-3 py-2.5 text-center text-[#A7B8D8] font-semibold">Servis</th>
                               <th className="px-3 py-2.5 text-center text-[#A7B8D8] font-semibold">Adet</th>
                               <th className="px-3 py-2.5 text-center text-[#A7B8D8] font-semibold">Ağırlık</th>
                             </tr>
@@ -1521,7 +1778,13 @@ export default function OverviewPage() {
                                   <td className="px-3 py-2.5">
                                     <span className={`inline-flex items-center px-2 py-0.5 rounded font-mono text-[11px] font-bold ${sevBg}`} style={{ color: sevColor }}>{e.code}</span>
                                   </td>
-                                  <td className="px-3 py-2.5 text-[#A7B8D8] leading-snug max-w-[220px]">{e.desc}</td>
+                                  <td className="px-3 py-2.5 text-[#A7B8D8] leading-snug max-w-[180px]">{e.desc}</td>
+                                  <td className="px-3 py-2.5 text-center">
+                                    {e.service_type === 'SLM'
+                                      ? <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-black bg-[#FF4C4C]/20 text-[#FF4C4C]">🔴 SLM</span>
+                                      : <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-black bg-[#2E86FF]/20 text-[#2E86FF]">🔵 FLM</span>
+                                    }
+                                  </td>
                                   <td className="px-3 py-2.5 text-center font-black text-white text-sm">{e.count}</td>
                                   <td className="px-3 py-2.5">
                                     <div className="flex items-center gap-1.5">
@@ -1557,10 +1820,12 @@ export default function OverviewPage() {
                     const aciliyetIcon  = (a: string) =>
                       a === 'KRITIK' ? '🔴' : a === 'YUKSEK' ? '🟠' : a === 'ORTA' ? '🟡' : '🟢';
                     const eylemLabel = (e: string) => ({
-                      COMBINED_SERVICE: 'Kombine Servis (FLM + İkmal)',
-                      FLM: 'Saha Ekibi (FLM)',
-                      SLM: 'Uzaktan Servis (SLM)',
+                      COMBINED_SERVICE: 'Kombine Servis (Vendor + Bantaş CIT)',
+                      FLM_VENDOR: 'Saha Bakım — Bantaş CIT',
+                      FLM_SUBE_PERSONEL: 'Saha Bakım — Şube Personeli',
+                      SLM_VENDOR: 'Vendor Teknik Servis',
                       IKMAL: 'Nakit İkmali',
+                      PARA_TOPLAMA: 'Nakit Toplama',
                       TOPLAMA: 'Nakit Toplama',
                       IZLE: 'Takip / İzle',
                       PROAKTIF_IKMAL: 'Proaktif İkmal',
@@ -1596,9 +1861,16 @@ export default function OverviewPage() {
                               <div className="text-base font-black text-white mb-1 leading-tight">{eylemLabel(bv.eylem)}</div>
                               {/* Atanan ekip */}
                               {bv.atanan_takim && bv.atanan_takim !== '—' && (
-                                <div className="flex items-center gap-1.5 text-[11px] mb-3">
-                                  <span className="text-[#A7B8D8]">Atanan Ekip:</span>
-                                  <span className="font-bold" style={{ color: aciliyetColor(bv.aciliyet) }}>{bv.atanan_takim}</span>
+                                <div className="flex flex-col gap-1 mb-3">
+                                  <div className="flex items-center gap-1.5 text-[11px]">
+                                    <span className="text-[#A7B8D8]">Atanan Ekip:</span>
+                                    <span className="font-bold" style={{ color: aciliyetColor(bv.aciliyet) }}>{bv.atanan_takim}</span>
+                                  </div>
+                                  {(bv.eylem === 'SLM_VENDOR' || String(bv.eylem ?? '').includes('SLM')) && (
+                                    <div className="text-[10px] text-[#F2B705] bg-[#F2B705]/10 border border-[#F2B705]/20 rounded px-2 py-1">
+                                      ⚠️ Bantaş yalnızca güvenlik eskörü sağlar — teknik işe karışmaz. Vendor teknisyen ATM'nin tümüne müdahale eder.
+                                    </div>
+                                  )}
                                 </div>
                               )}
                               {/* Sağlık + Geçmiş Risk */}
@@ -1674,50 +1946,588 @@ export default function OverviewPage() {
                           </>
                         ) : (
                           /* ── FALLBACK: Kural Tabanlı Mod (Beyin çevrimdışı) ───── */
-                          <>
-                            <div className="p-3 rounded-xl bg-gradient-to-br from-[#FF4C4C]/10 to-[#FF4C4C]/5 ring-1 ring-[#FF4C4C]/30">
-                              <div className="flex items-center gap-2 mb-1.5">
-                                <span className="text-base">{BRM_DEMO_LOG.error_count > 0 ? '⚠️' : '✅'}</span>
-                                <span className={`text-xs font-bold ${BRM_DEMO_LOG.error_count > 0 ? 'text-[#FF4C4C]' : 'text-[#10B981]'}`}>
-                                  {BRM_DEMO_LOG.error_count > 0 ? 'ARIZA TESPİTİ — BAKIM GEREKLİ' : 'SİSTEM NORMAL'}
-                                </span>
-                              </div>
-                              <div className="text-[11px] text-[#A7B8D8] leading-relaxed">
-                                {BRM_DEMO_LOG.error_count > 0
-                                  ? <>{BRM_BRAIN_FAULTS.length} arıza türü tespit edildi. En kritik: <strong className="text-white">{BRM_BRAIN_FAULTS[0]?.title || 'bakım gerekli'}</strong>. Müdahale edilmezse <strong className="text-[#FF4C4C]">servis dışı kalma riski</strong> yüksek.</>
-                                  : 'Log inceleme tamamlandı. Kritik arıza tespit edilmedi.'}
-                              </div>
-                              <div className="mt-2 pt-2 border-t border-[#FF4C4C]/20 flex items-center gap-2">
-                                <div className={`text-lg font-black ${BRM_DEMO_LOG.health_score>=80?'text-[#10B981]':BRM_DEMO_LOG.health_score>=60?'text-[#F2B705]':'text-[#FF4C4C]'}`}>{BRM_DEMO_LOG.health_score}/100</div>
-                                <div className="flex-1"><div className="h-2 bg-[#1A3050] rounded-full overflow-hidden"><div className={`h-full rounded-full transition-all duration-1000 ${BRM_DEMO_LOG.health_score>=80?'bg-[#10B981]':BRM_DEMO_LOG.health_score>=60?'bg-[#F2B705]':'bg-[#FF4C4C]'}`} style={{width:`${BRM_DEMO_LOG.health_score}%`}}/></div><div className="text-[10px] text-[#A7B8D8] mt-0.5">ATM Sağlık Skoru</div></div>
-                              </div>
-                            </div>
-                            {BRM_BRAIN_FAULTS.map(fault => {
-                              const colors = { critical:{bg:'from-[#FF4C4C]/15 to-[#FF4C4C]/5',ring:'ring-[#FF4C4C]/40',text:'text-[#FF4C4C]',badge:'bg-[#FF4C4C]/20 text-[#FF4C4C]'}, high:{bg:'from-[#F2B705]/15 to-[#F2B705]/5',ring:'ring-[#F2B705]/40',text:'text-[#F2B705]',badge:'bg-[#F2B705]/20 text-[#F2B705]'}, medium:{bg:'from-[#2E86FF]/15 to-[#2E86FF]/5',ring:'ring-[#2E86FF]/30',text:'text-[#2E86FF]',badge:'bg-[#2E86FF]/20 text-[#2E86FF]'} }[fault.severity];
-                              return (
-                                <div key={fault.id} className={`p-3 rounded-xl bg-gradient-to-br ${colors.bg} ring-1 ${colors.ring}`}>
-                                  <div className="flex items-start justify-between gap-2 mb-1.5">
-                                    <div className="flex items-center gap-2"><span className="text-base">{fault.icon}</span><div><div className={`text-[11px] font-bold ${colors.text}`}>{fault.title}</div>{fault.count>0&&<div className="text-[9px] text-[#A7B8D8]">{fault.count}× tespit edildi</div>}</div></div>
-                                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${colors.badge} whitespace-nowrap`}>{fault.severity==='critical'?'KRİTİK':fault.severity==='high'?'YÜKSEK':'ORTA'}</span>
+                          (() => {
+                            // Parser'dan gelen service_type & module alanları kullanılarak FLM/SLM kararı
+                            const slmErrs = rawErrors.filter((e: any) => String(e.service_type || 'FLM').toUpperCase() === 'SLM');
+                            const flmErrs = rawErrors.filter((e: any) => String(e.service_type || 'FLM').toUpperCase() !== 'SLM');
+                            const verdict = slmErrs.length > 0 ? 'SLM' : (rawErrors.length > 0 ? 'FLM' : null);
+                            // SLM hataları (kod bazında tekilleştirilmiş)
+                            const slmByCode: Record<string, {code: string; desc: string; module: string; count: number}> = {};
+                            for (const e of slmErrs) {
+                              if (!slmByCode[e.error_code]) slmByCode[e.error_code] = { code: e.error_code, desc: e.description, module: e.module || '', count: 0 };
+                              slmByCode[e.error_code].count++;
+                            }
+                            const slmDetails = Object.values(slmByCode);
+                            const slmModules = [...new Set(slmErrs.map((e: any) => e.module).filter(Boolean))] as string[];
+                            const flmModules = [...new Set(flmErrs.map((e: any) => e.module).filter(Boolean))] as string[];
+                            return (
+                              <>
+                                {/* ── Nihai FLM / SLM Karar Kartı ── */}
+                                {verdict === null ? (
+                                  <div className="p-4 rounded-xl bg-[#10B981]/10 ring-1 ring-[#10B981]/40 flex items-center gap-3">
+                                    <span className="text-2xl">✅</span>
+                                    <div>
+                                      <div className="text-sm font-black text-[#10B981]">SİSTEM NORMAL</div>
+                                      <div className="text-[11px] text-[#A7B8D8] mt-0.5">Log inceleme tamamlandı. Kritik arıza tespit edilmedi.</div>
+                                    </div>
                                   </div>
-                                  <div className="text-[10px] text-[#A7B8D8] mb-1.5 leading-relaxed">{fault.impact}</div>
-                                  <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full" style={{background:fault.severity==='critical'?'#FF4C4C':fault.severity==='high'?'#F2B705':'#2E86FF'}}/><div className={`text-[10px] font-semibold ${colors.text}`}>{fault.action}</div></div>
-                                  <div className="mt-1.5 h-1 bg-[#1A3050] rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-1000" style={{width:`${fault.urgency}%`,background:fault.severity==='critical'?'#FF4C4C':fault.severity==='high'?'#F2B705':'#2E86FF'}}/></div>
+                                ) : verdict === 'SLM' ? (
+                                  <div className="p-4 rounded-xl ring-2 bg-[#FF4C4C]/10 ring-[#FF4C4C]">
+                                    <div className="flex items-center gap-2 mb-3">
+                                      <span className="text-2xl">🔴</span>
+                                      <div>
+                                        <div className="text-base font-black text-[#FF4C4C]">SLM MÜDAHALESİ GEREKLİ</div>
+                                        <div className="text-[11px] text-[#F2B705] mt-0.5">Vendor Teknisyen çağrılmalı — Bantaş yalnızca güvenlik eskörü sağlar, teknik işe karışmaz</div>
+                                      </div>
+                                    </div>
+                                    {/* Neden SLM? */}
+                                    <div className="mb-3 p-3 rounded-xl bg-[#0E2142] ring-1 ring-[#FF4C4C]/30">
+                                      <div className="text-[10px] font-bold text-[#F2B705] mb-2">📋 Neden SLM? — Hardware Arızası Tespit Edildi</div>
+                                      <div className="flex flex-col gap-2">
+                                        {slmDetails.map((d: any) => (
+                                          <div key={d.code} className="flex items-start gap-2">
+                                            <span className="font-mono text-[11px] font-black text-[#FF4C4C] shrink-0 mt-0.5">[{d.code}]</span>
+                                            <div className="flex-1">
+                                              <div className="text-[11px] text-white font-semibold">{d.desc}</div>
+                                              {d.module && <div className="text-[10px] text-[#A7B8D8] mt-0.5">📍 {d.module}</div>}
+                                            </div>
+                                            <span className="text-[10px] text-[#A7B8D8] shrink-0">×{d.count}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                    {/* Vendor teknisyen müdahale bölgeleri */}
+                                    {slmModules.length > 0 && (
+                                      <div className="p-3 rounded-xl bg-[#8B1874]/10 ring-1 ring-[#8B1874]/40 mb-3">
+                                        <div className="text-[10px] font-bold text-[#E879F9] mb-2">🔧 Vendor Teknisyen Kontrol Edecek Bölgeler</div>
+                                        <div className="flex flex-col gap-1.5">
+                                          {slmModules.map((m: string) => (
+                                            <div key={m} className="flex items-center gap-2">
+                                              <span className="w-2 h-2 rounded-full bg-[#FF4C4C] shrink-0"/>
+                                              <span className="text-[11px] text-white font-semibold">{m}</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    {/* Aynı ziyarette FLM işleri de yapılabilir */}
+                                    {flmErrs.length > 0 && flmModules.length > 0 && (
+                                      <div className="p-3 rounded-xl bg-[#2E86FF]/5 ring-1 ring-[#2E86FF]/30 mb-3">
+                                        <div className="text-[10px] font-bold text-[#2E86FF] mb-1.5">🔵 Vendor ziyaretinde FLM işleri de yapılabilir (kombine)</div>
+                                        {flmModules.map((m: string) => (
+                                          <div key={m} className="flex items-center gap-2">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-[#2E86FF] shrink-0"/>
+                                            <span className="text-[10px] text-[#A7B8D8]">{m}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                    {/* Health bar */}
+                                    <div className="flex items-center gap-3 pt-3 border-t border-[#FF4C4C]/20">
+                                      <div className={`text-xl font-black ${BRM_DEMO_LOG.health_score>=80?'text-[#10B981]':BRM_DEMO_LOG.health_score>=60?'text-[#F2B705]':'text-[#FF4C4C]'}`}>{BRM_DEMO_LOG.health_score}/100</div>
+                                      <div className="flex-1"><div className="h-2 bg-[#1A3050] rounded-full overflow-hidden"><div className={`h-full rounded-full ${BRM_DEMO_LOG.health_score>=80?'bg-[#10B981]':BRM_DEMO_LOG.health_score>=60?'bg-[#F2B705]':'bg-[#FF4C4C]'}`} style={{width:`${BRM_DEMO_LOG.health_score}%`}}/></div><div className="text-[9px] text-[#A7B8D8] mt-0.5">ATM Sağlık Skoru</div></div>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  /* FLM verdict */
+                                  <div className="p-4 rounded-xl ring-2 bg-[#2E86FF]/10 ring-[#2E86FF]">
+                                    <div className="flex items-center gap-2 mb-3">
+                                      <span className="text-2xl">🔵</span>
+                                      <div>
+                                        <div className="text-base font-black text-[#2E86FF]">FLM MÜDAHALESİ</div>
+                                        <div className="text-[11px] text-[#A7B8D8] mt-0.5">Bantaş Saha Ekibi — Fiziksel temizlik, sıkışma açma, kağıt/belt değişimi</div>
+                                      </div>
+                                    </div>
+                                    {flmModules.length > 0 && (
+                                      <div className="p-3 rounded-xl bg-[#2E86FF]/5 ring-1 ring-[#2E86FF]/30 mb-3">
+                                        <div className="text-[10px] font-bold text-[#2E86FF] mb-2">🔧 FLM Müdahale Bölgeleri</div>
+                                        <div className="flex flex-col gap-1.5">
+                                          {flmModules.map((m: string) => (
+                                            <div key={m} className="flex items-center gap-2">
+                                              <span className="w-2 h-2 rounded-full bg-[#2E86FF] shrink-0"/>
+                                              <span className="text-[11px] text-white font-semibold">{m}</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    <div className="flex items-center gap-3 pt-3 border-t border-[#2E86FF]/20">
+                                      <div className={`text-xl font-black ${BRM_DEMO_LOG.health_score>=80?'text-[#10B981]':BRM_DEMO_LOG.health_score>=60?'text-[#F2B705]':'text-[#FF4C4C]'}`}>{BRM_DEMO_LOG.health_score}/100</div>
+                                      <div className="flex-1"><div className="h-2 bg-[#1A3050] rounded-full overflow-hidden"><div className={`h-full rounded-full ${BRM_DEMO_LOG.health_score>=80?'bg-[#10B981]':BRM_DEMO_LOG.health_score>=60?'bg-[#F2B705]':'bg-[#FF4C4C]'}`} style={{width:`${BRM_DEMO_LOG.health_score}%`}}/></div><div className="text-[9px] text-[#A7B8D8] mt-0.5">ATM Sağlık Skoru</div></div>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* ── Arıza Detay Kartları ── */}
+                                {BRM_BRAIN_FAULTS.map(fault => {
+                                  const colors = { critical:{bg:'from-[#FF4C4C]/15 to-[#FF4C4C]/5',ring:'ring-[#FF4C4C]/40',text:'text-[#FF4C4C]',badge:'bg-[#FF4C4C]/20 text-[#FF4C4C]'}, high:{bg:'from-[#F2B705]/15 to-[#F2B705]/5',ring:'ring-[#F2B705]/40',text:'text-[#F2B705]',badge:'bg-[#F2B705]/20 text-[#F2B705]'}, medium:{bg:'from-[#2E86FF]/15 to-[#2E86FF]/5',ring:'ring-[#2E86FF]/30',text:'text-[#2E86FF]',badge:'bg-[#2E86FF]/20 text-[#2E86FF]'} }[fault.severity];
+                                  return (
+                                    <div key={fault.id} className={`p-3 rounded-xl bg-gradient-to-br ${colors.bg} ring-1 ${colors.ring}`}>
+                                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                                        <div className="flex items-center gap-2"><span className="text-base">{fault.icon}</span><div><div className={`text-[11px] font-bold ${colors.text}`}>{fault.title}</div>{fault.count>0&&<div className="text-[9px] text-[#A7B8D8]">{fault.count}× tespit edildi</div>}</div></div>
+                                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${colors.badge} whitespace-nowrap`}>{fault.severity==='critical'?'KRİTİK':fault.severity==='high'?'YÜKSEK':'ORTA'}</span>
+                                      </div>
+                                      <div className="text-[10px] text-[#A7B8D8] mb-1.5 leading-relaxed">{fault.impact}</div>
+                                      <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full" style={{background:fault.severity==='critical'?'#FF4C4C':fault.severity==='high'?'#F2B705':'#2E86FF'}}/><div className={`text-[10px] font-semibold ${colors.text}`}>{fault.action}</div></div>
+                                      <div className="mt-1.5 h-1 bg-[#1A3050] rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-1000" style={{width:`${fault.urgency}%`,background:fault.severity==='critical'?'#FF4C4C':fault.severity==='high'?'#F2B705':'#2E86FF'}}/></div>
+                                    </div>
+                                  );
+                                })}
+
+                                {/* ── Log Footer ── */}
+                                <div className="p-2.5 rounded-xl bg-[#0E2142] ring-1 ring-[#2B416B] text-[10px] text-[#A7B8D8] flex items-center justify-between flex-wrap gap-2">
+                                  <span>Log: <strong className="text-white">{BRM_DEMO_LOG.log_date}</strong> • {BRM_DEMO_LOG.source_file}</span>
+                                  <span className="text-[#F2B705] font-semibold">⚡ Kural Tabanlı Mod — AI Beyin çevrimdışı</span>
                                 </div>
-                              );
-                            })}
-                            <div className="p-3 rounded-xl bg-[#0E2142] ring-1 ring-[#2B416B]">
-                              <div className="text-[10px] font-bold text-[#2E86FF] mb-2">🧠 AI KARAR ÖZETİ</div>
-                              {BRM_BRAIN_FAULTS.length > 0
-                                ? BRM_BRAIN_FAULTS.slice(0,4).map((f: any, i: number)=>(<div key={i} className="flex items-start gap-2 text-[10px] text-[#A7B8D8]"><span>{f.severity==='critical'?'🔴':f.severity==='high'?'🟠':'🟡'}</span><span>{f.action}</span></div>))
-                                : <div className="text-[10px] text-[#10B981]">✓ Kritik arıza tespit edilmedi. Rutin bakım takibi yeterli.</div>}
-                              <div className="mt-2 pt-2 border-t border-[#2B416B] text-[10px] text-[#A7B8D8]">Log Tarihi: <strong className="text-white">{BRM_DEMO_LOG.log_date}</strong> • Kaynak: <strong className="text-[#A7B8D8]">{BRM_DEMO_LOG.source_file}</strong></div>
-                            </div>
-                          </>
+                              </>
+                            );
+                          })()
                         )}
                       </div>
                     );
                   })()}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Results — IDC (Kart Okuyucu) */}
+          {vendorLogSimulated && !vendorLogLoading && idcLog && (() => {
+            const { hs, hsBadge, verdict, slmErrors, flmErrors, sessions, d } = idcLog;
+            const brain = brmLogData?.brain;
+            const cancelPct = Math.round((d.cancel_rate || 0) * 100);
+            return (
+              <div className="space-y-4">
+                {/* ATM Info Strip */}
+                <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl bg-[#0A1628] ring-1 ring-[#2E86FF]/30">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">💳</span>
+                    <div>
+                      <div className="text-[10px] text-[#A7B8D8]">ATM</div>
+                      <div className="text-sm font-bold text-white">{d.atm_id}</div>
+                    </div>
+                  </div>
+                  <div className="w-px h-8 bg-[#2E86FF]/20" />
+                  <div>
+                    <div className="text-[10px] text-[#A7B8D8]">Tarih</div>
+                    <div className="text-sm font-semibold text-white">{d.log_date || '—'}</div>
+                  </div>
+                  <div className="w-px h-8 bg-[#2E86FF]/20" />
+                  <div>
+                    <div className="text-[10px] text-[#A7B8D8]">Kart Oturumları</div>
+                    <div className="text-sm font-bold text-white">{d.total_sessions}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-[#10B981]">✓ Başarılı</div>
+                    <div className="text-sm font-bold text-[#10B981]">{d.ok_count}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-[#EF4444]">✕ İptal</div>
+                    <div className="text-sm font-bold text-[#EF4444]">{d.cancel_count} <span className="text-xs">(%{cancelPct})</span></div>
+                  </div>
+                  <div className="w-px h-8 bg-[#2E86FF]/20" />
+                  <div>
+                    <div className="text-[10px] text-[#A7B8D8]">Sağlık</div>
+                    <div className="text-sm font-bold">{hsBadge} <span className={hs >= 80 ? 'text-[#10B981]' : hs >= 50 ? 'text-[#F2B705]' : 'text-[#EF4444]'}>{hs}/100</span></div>
+                  </div>
+                  <div className="w-px h-8 bg-[#2E86FF]/20" />
+                  <div>
+                    <div className="text-[10px] text-[#A7B8D8]">Ort. Okuma</div>
+                    <div className="text-sm font-semibold text-white">{d.avg_ok_duration_sec?.toFixed(1)} sn</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-[#A7B8D8]">Maks. Okuma</div>
+                    <div className={`text-sm font-bold ${d.max_duration_sec > 120 ? 'text-[#EF4444]' : d.max_duration_sec > 30 ? 'text-[#F2B705]' : 'text-white'}`}>
+                      {d.max_duration_sec < 60 ? `${d.max_duration_sec?.toFixed(0)} sn` : `${Math.floor(d.max_duration_sec/60)} dk`}
+                    </div>
+                  </div>
+                  <div className="ml-auto flex gap-2">
+                    <span className="px-2 py-1 rounded-full bg-[#2E86FF]/20 text-[#2E86FF] text-[10px] font-bold ring-1 ring-[#2E86FF]/40">IDC — Kart Okuyucu</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* LEFT — Session Table */}
+                  <div className="bg-[#0A1628] rounded-xl ring-1 ring-[#2E86FF]/20 overflow-hidden">
+                    <div className="px-4 py-3 border-b border-[#2E86FF]/10 flex items-center justify-between">
+                      <div className="text-xs font-bold text-white flex items-center gap-2">
+                        💳 Kart Oturumları
+                        <span className="text-[#A7B8D8] font-normal">({Math.min(sessions.length, 50)} kayıt)</span>
+                      </div>
+                      {d.retain_count > 0 && (
+                        <span className="px-2 py-0.5 rounded-full bg-[#EF4444]/20 text-[#EF4444] text-[10px] font-bold ring-1 ring-[#EF4444]/30">
+                          ⚠️ {d.retain_count}× Kart Yutuldu
+                        </span>
+                      )}
+                    </div>
+                    <div className="overflow-auto max-h-72">
+                      <table className="w-full text-xs">
+                        <thead className="sticky top-0 bg-[#0D1F3C]">
+                          <tr>
+                            <th className="px-3 py-2 text-left text-[#A7B8D8] font-semibold">Saat</th>
+                            <th className="px-3 py-2 text-left text-[#A7B8D8] font-semibold">Süre</th>
+                            <th className="px-3 py-2 text-left text-[#A7B8D8] font-semibold">Durum</th>
+                            <th className="px-3 py-2 text-left text-[#A7B8D8] font-semibold">Hız</th>
+                            <th className="px-3 py-2 text-center text-[#A7B8D8] font-semibold">Chip IO</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sessions.map((s: any, i: number) => (
+                            <tr key={i} className="border-t border-[#1A3050] hover:bg-[#1A3050]/40 transition-colors">
+                              <td className="px-3 py-1.5 text-white font-mono">{s.timeStr}</td>
+                              <td className="px-3 py-1.5 text-[#A7B8D8] font-mono">{s.durStr}</td>
+                              <td className="px-3 py-1.5">
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${s.statusBadge.cls}`}>{s.statusBadge.text}</span>
+                              </td>
+                              <td className="px-3 py-1.5">
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${s.speedBadge.cls}`}>{s.speedBadge.text}</span>
+                              </td>
+                              <td className="px-3 py-1.5 text-center text-[#A7B8D8]">{s.chipIo > 0 ? `${s.chipIo}×` : '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {/* Summary row */}
+                    <div className="px-4 py-2 border-t border-[#2E86FF]/10 flex gap-4 text-[10px] text-[#A7B8D8]">
+                      <span>🔴 Kritik: <strong className="text-white">{d.critical_slow_count + d.critical_cancel_count}</strong></span>
+                      <span>🟡 Yavaş: <strong className="text-white">{d.slow_read_count + d.very_slow_count}</strong></span>
+                      <span>🔵 Chip IO: <strong className="text-white">{d.chip_io_total}</strong></span>
+                      <span>🟣 Eject: <strong className="text-white">{d.eject_count}</strong></span>
+                    </div>
+                  </div>
+
+                  {/* RIGHT — FLM/SLM Verdict */}
+                  <div className="space-y-3">
+                    {/* AI Brain verdict (if available) */}
+                    {brain && (
+                      <div className={`rounded-xl p-4 ring-1 ${brain.aciliyet === 'KRITIK' ? 'bg-[#EF4444]/10 ring-[#EF4444]/40' : brain.aciliyet === 'YUKSEK' ? 'bg-[#F97316]/10 ring-[#F97316]/40' : 'bg-[#10B981]/10 ring-[#10B981]/40'}`}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-lg">🧠</span>
+                          <span className="text-xs font-bold text-white">AI Beyin Kararı</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${brain.aciliyet === 'KRITIK' ? 'bg-[#EF4444] text-white' : brain.aciliyet === 'YUKSEK' ? 'bg-[#F97316] text-white' : 'bg-[#10B981] text-white'}`}>{brain.aciliyet}</span>
+                        </div>
+                        <div className="text-sm font-bold text-white mb-1">{brain.eylem?.replace(/_/g,' ')}</div>
+                        {brain.atanan_takim && <div className="text-xs text-[#A7B8D8]">👤 {brain.atanan_takim}</div>}
+                        {brain.sebepler?.length > 0 && (
+                          <ul className="mt-2 space-y-0.5">
+                            {brain.sebepler.slice(0,4).map((s: string, i: number) => (
+                              <li key={i} className="text-xs text-[#A7B8D8] flex items-start gap-1"><span className="text-[#F2B705] mt-0.5 flex-shrink-0">›</span>{s}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+
+                    {/* FLM/SLM Verdict Card */}
+                    <div className={`rounded-xl p-4 ring-1 ${verdict === 'SLM' ? 'bg-[#EF4444]/10 ring-[#EF4444]/40' : verdict === 'FLM' ? 'bg-[#2E86FF]/10 ring-[#2E86FF]/40' : 'bg-[#10B981]/10 ring-[#10B981]/40'}`}>
+                      <div className="flex items-center gap-3 mb-3">
+                        <span className="text-2xl">{verdict === 'SLM' ? '🔴' : verdict === 'FLM' ? '🔵' : '🟢'}</span>
+                        <div>
+                          <div className="text-xs text-[#A7B8D8] uppercase tracking-widest">Servis Tipi</div>
+                          <div className={`text-xl font-black ${verdict === 'SLM' ? 'text-[#EF4444]' : verdict === 'FLM' ? 'text-[#2E86FF]' : 'text-[#10B981]'}`}>
+                            {verdict === 'SLM' ? 'SLM — Vendor Teknisyen' : verdict === 'FLM' ? 'FLM — Bantaş Saha Ekibi' : 'Normal — Takip Yeterli'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {verdict !== 'OK' && (
+                        <>
+                          <div className="text-xs font-semibold text-[#A7B8D8] mb-1 mt-2">
+                            {verdict === 'SLM' ? '🔴 Neden SLM? Donanım Bulguları:' : '🔵 Neden FLM? Saha Ekibi İşleri:'}
+                          </div>
+                          <ul className="space-y-1">
+                            {(verdict === 'SLM' ? slmErrors : flmErrors).slice(0,4).map((e: any, i: number) => (
+                              <li key={i} className="text-xs text-[#A7B8D8] flex items-start gap-2">
+                                <span className={`flex-shrink-0 mt-0.5 font-bold ${verdict === 'SLM' ? 'text-[#EF4444]' : 'text-[#2E86FF]'}`}>›</span>
+                                <span><strong className="text-white">{e.error_code}</strong> — {e.description}</span>
+                              </li>
+                            ))}
+                          </ul>
+
+                          {/* Modules */}
+                          {(verdict === 'SLM' ? slmErrors : flmErrors).some((e: any) => e.module) && (
+                            <div className="mt-3">
+                              <div className="text-[10px] text-[#A7B8D8] font-semibold mb-1 uppercase tracking-wider">
+                                {verdict === 'SLM' ? '🔧 Vendor Teknisyen Kontrol Edecek:' : '🛠️ Saha Ekibi Yapacaklar:'}
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                {[...new Set((verdict === 'SLM' ? slmErrors : flmErrors).map((e: any) => e.module).filter(Boolean))].slice(0,5).map((m: any, i: number) => (
+                                  <span key={i} className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${verdict === 'SLM' ? 'bg-[#EF4444]/20 text-[#EF4444] ring-1 ring-[#EF4444]/30' : 'bg-[#2E86FF]/20 text-[#2E86FF] ring-1 ring-[#2E86FF]/30'}`}>{m}</span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* FLM bonus: if SLM verdict also has FLM errors, show combined */}
+                          {verdict === 'SLM' && flmErrors.length > 0 && (
+                            <div className="mt-3 pt-3 border-t border-[#EF4444]/20">
+                              <div className="text-[10px] text-[#2E86FF] font-semibold mb-1">🔵 Ayrıca FLM Gerektiren İşler ({flmErrors.length}):</div>
+                              <div className="flex flex-wrap gap-1">
+                                {[...new Set(flmErrors.map((e: any) => e.module).filter(Boolean))].slice(0,3).map((m: any, i: number) => (
+                                  <span key={i} className="px-2 py-0.5 rounded-full text-[10px] bg-[#2E86FF]/15 text-[#2E86FF] ring-1 ring-[#2E86FF]/25">{m}</span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
+
+                      {verdict === 'OK' && (
+                        <div className="text-xs text-[#10B981]">Kritik anomali tespit edilmedi. Kart okuyucu normal çalışıyor.</div>
+                      )}
+                    </div>
+
+                    {/* Quick stats row */}
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { label: 'Yavaş Okuma', val: d.slow_read_count + d.very_slow_count, color: '#F2B705' },
+                        { label: 'Kritik', val: d.critical_slow_count + d.critical_cancel_count, color: '#EF4444' },
+                        { label: 'Kart Yutma', val: d.retain_count, color: '#EF4444' },
+                      ].map((s, i) => (
+                        <div key={i} className="bg-[#0A1628] rounded-lg p-2 ring-1 ring-[#2E86FF]/15 text-center">
+                          <div className="text-xs font-bold" style={{ color: s.val > 0 ? s.color : '#10B981' }}>{s.val}</div>
+                          <div className="text-[10px] text-[#A7B8D8]">{s.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div className="flex items-center justify-between text-[10px] text-[#A7B8D8] px-1">
+                  <span>Log: <strong className="text-white">{d.log_date}</strong> • {d.source_file}</span>
+                  <span className={brain ? 'text-[#10B981] font-semibold' : 'text-[#F2B705] font-semibold'}>{brain ? '🧠 AI Beyin Aktif' : '⚡ Kural Tabanlı Mod'}</span>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── XFS Uygulama Logu Display ──────────────────────────────────── */}
+          {vendorLogSimulated && !vendorLogLoading && xfsLog && (() => {
+            const { atms, worst, source_file, parsed_rows, kritik_sayisi, yuksek_sayisi } = xfsLog;
+            if (!worst) return null;
+            const hs: number = worst.health_score ?? 100;
+            const brain: any = worst.brain ?? {};
+            const hsColor = hs >= 80 ? '#10B981' : hs >= 55 ? '#F2B705' : '#EF4444';
+            const aciliyetColor = (a: string) =>
+              a === 'KRITIK' ? '#FF4C4C' : a === 'YUKSEK' ? '#F2B705' : a === 'ORTA' ? '#2E86FF' : '#10B981';
+            const verdict: string = brain.eylem ?? worst.beyin_oneri?.eylem ?? 'IZLE';
+            const aciliyet: string = brain.aciliyet ?? worst.beyin_oneri?.aciliyet ?? 'DUSUK';
+            const acCol = aciliyetColor(aciliyet);
+            const sorunlar: string[] = worst.sorunlar ?? [];
+
+            return (
+              <div className="space-y-4">
+                {/* ATM Info Strip */}
+                <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl bg-[#0A1628] ring-1 ring-[#8B5CF6]/30">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">🖥️</span>
+                    <div>
+                      <div className="text-[10px] text-[#A7B8D8]">ATM</div>
+                      <div className="text-sm font-bold text-white">{worst.terminal_id}</div>
+                    </div>
+                  </div>
+                  <div className="w-px h-8 bg-[#8B5CF6]/20" />
+                  <div>
+                    <div className="text-[10px] text-[#A7B8D8]">Sunucu</div>
+                    <div className="text-xs font-semibold text-white">{worst.server || '—'}</div>
+                  </div>
+                  <div className="w-px h-8 bg-[#8B5CF6]/20" />
+                  <div>
+                    <div className="text-[10px] text-[#A7B8D8]">Log Tarihi</div>
+                    <div className="text-xs font-semibold text-white">{worst.log_date || '—'}</div>
+                  </div>
+                  <div className="w-px h-8 bg-[#8B5CF6]/20" />
+                  <div>
+                    <div className="text-[10px] text-[#A7B8D8]">Oturum</div>
+                    <div className="text-sm font-bold text-white">{worst.total_sessions}</div>
+                  </div>
+                  <div className="w-px h-8 bg-[#8B5CF6]/20" />
+                  <div>
+                    <div className="text-[10px] text-[#A7B8D8]">Sağlık</div>
+                    <div className="text-sm font-bold" style={{ color: hsColor }}>{hs}/100</div>
+                  </div>
+                  <div className="w-px h-8 bg-[#8B5CF6]/20" />
+                  <div>
+                    <div className="text-[10px] text-[#A7B8D8]">Ort. Gecikme</div>
+                    <div className={`text-xs font-semibold ${worst.avg_latency_sec > 30 ? 'text-[#EF4444]' : worst.avg_latency_sec > 10 ? 'text-[#F2B705]' : 'text-white'}`}>{worst.avg_latency_sec?.toFixed(1)} sn</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-[#A7B8D8]">Maks. Gecikme</div>
+                    <div className={`text-xs font-bold ${worst.max_latency_sec > 30 ? 'text-[#EF4444]' : worst.max_latency_sec > 10 ? 'text-[#F2B705]' : 'text-white'}`}>{worst.max_latency_sec?.toFixed(1)} sn</div>
+                  </div>
+                  <div className="ml-auto flex gap-2">
+                    {atms.length > 1 && (
+                      <span className="px-2 py-1 rounded-full bg-[#8B5CF6]/20 text-[#A78BFA] text-[10px] font-bold ring-1 ring-[#8B5CF6]/40">{atms.length} ATM</span>
+                    )}
+                    {kritik_sayisi > 0 && (
+                      <span className="px-2 py-1 rounded-full bg-[#EF4444]/20 text-[#EF4444] text-[10px] font-bold ring-1 ring-[#EF4444]/40">🔴 {kritik_sayisi} KRİTİK</span>
+                    )}
+                    <span className="px-2 py-1 rounded-full bg-[#8B5CF6]/20 text-[#A78BFA] text-[10px] font-bold ring-1 ring-[#8B5CF6]/40">XFS — Uygulama Logu</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* LEFT: Modül Bazlı Hata Tablosu */}
+                  <div className="bg-[#0A1628] rounded-xl ring-1 ring-[#8B5CF6]/20 overflow-hidden">
+                    <div className="px-4 py-3 border-b border-[#8B5CF6]/10">
+                      <div className="text-xs font-bold text-white">📊 Modül Bazlı Analiz</div>
+                    </div>
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-[#0D1F3C]">
+                          <th className="px-3 py-2 text-left text-[#A7B8D8] font-semibold">Modül</th>
+                          <th className="px-3 py-2 text-center text-[#10B981] font-semibold">✓ OK</th>
+                          <th className="px-3 py-2 text-center text-[#EF4444] font-semibold">✗ Hata</th>
+                          <th className="px-3 py-2 text-center text-[#F2B705] font-semibold">İptal</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[
+                          { label: '💳 IDC Kart', ok: worst.idc_read_ok, err: worst.idc_read_error + worst.idc_hw_error, cancel: worst.idc_read_cancel, note: worst.idc_hw_error > 0 ? `⚠️ ${worst.idc_hw_error}× HW` : worst.idc_offline ? '🔴 Offline' : '' },
+                          { label: '🔐 PIN Pad',  ok: worst.pin_get_ok,  err: worst.pin_get_error,  cancel: worst.pin_get_cancel },
+                          { label: '💰 Para Yat.',ok: worst.cashin_ok,   err: worst.cashin_error,   cancel: 0 },
+                          { label: '🏧 Dispenser',ok: worst.dispense_ok, err: worst.dispense_error, cancel: 0 },
+                          { label: '🖨️ Yazıcı',  ok: worst.print_ok,   err: worst.print_error,    cancel: 0 },
+                          { label: '🌐 Host',     ok: worst.host_resp_ok,err: worst.host_resp_error,cancel: 0 },
+                        ].map((row, i) => (
+                          <tr key={i} className="border-t border-[#1A3050] hover:bg-[#1A3050]/30">
+                            <td className="px-3 py-2 text-[#A7B8D8] font-medium">
+                              {row.label}
+                              {(row as any).note ? <span className="ml-1 text-[#EF4444] text-[10px]">{(row as any).note}</span> : null}
+                            </td>
+                            <td className="px-3 py-2 text-center font-bold text-[#10B981]">{row.ok || '—'}</td>
+                            <td className="px-3 py-2 text-center font-bold" style={{ color: row.err > 0 ? '#EF4444' : '#4B5563' }}>{row.err || '—'}</td>
+                            <td className="px-3 py-2 text-center font-bold" style={{ color: row.cancel > 0 ? '#F2B705' : '#4B5563' }}>{row.cancel || '—'}</td>
+                          </tr>
+                        ))}
+                        {/* Gecikme satırı */}
+                        <tr className="border-t-2 border-[#8B5CF6]/20 bg-[#0A0F1E]/50">
+                          <td className="px-3 py-2 text-[#A7B8D8] font-medium">⏱️ Gecikme</td>
+                          <td className="px-3 py-2 text-center text-white text-[10px]" colSpan={2}>Ort: {worst.avg_latency_sec?.toFixed(1)}sn / Maks: {worst.max_latency_sec?.toFixed(1)}sn</td>
+                          <td className="px-3 py-2 text-center font-bold" style={{ color: worst.latency_crit_cnt > 0 ? '#EF4444' : '#4B5563' }}>{worst.latency_warn_cnt + worst.latency_crit_cnt || '—'}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    {/* İkmal var mı footer */}
+                    {worst.idc_retain > 0 && (
+                      <div className="px-4 py-2 border-t border-[#EF4444]/20 text-[10px] text-[#EF4444] font-semibold">
+                        ⚠️ Kart yutma: {worst.idc_retain}× — birikmeden temizlenmeli
+                      </div>
+                    )}
+                  </div>
+
+                  {/* RIGHT: AI Brain Verdict + Sorunlar */}
+                  <div className="space-y-3">
+                    {/* AI Brain Kararı */}
+                    <div className="rounded-xl p-4 ring-2" style={{ background: `${acCol}10`, borderColor: acCol }}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-lg">🧠</span>
+                        <span className="text-xs font-bold text-white">AI Beyin Kararı</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black text-white" style={{ background: acCol }}>
+                          {aciliyet === 'KRITIK' ? 'KRİTİK' : aciliyet === 'YUKSEK' ? 'YÜKSEK' : aciliyet === 'ORTA' ? 'ORTA' : 'DÜŞÜK'}
+                        </span>
+                      </div>
+                      <div className="text-base font-black text-white mb-2">
+                        {({
+                          COMBINED_SERVICE: 'Kombine Servis', FLM_VENDOR: 'Saha Bakım — FLM',
+                          FLM_SUBE_PERSONEL: 'Saha Bakım — Şube', SLM_VENDOR: 'Vendor Teknik Servis',
+                          FLM: 'Saha Bakım — FLM', SLM: 'Vendor Teknik Servis',
+                          IZLE: 'Takip / İzle',
+                        } as Record<string,string>)[verdict] ?? verdict}
+                      </div>
+                      {brain.atanan_takim && brain.atanan_takim !== '—' && (
+                        <div className="text-xs text-[#A7B8D8] mb-2">👤 {brain.atanan_takim}</div>
+                      )}
+                      {/* Health bar */}
+                      <div className="flex items-center gap-2 pt-2 border-t" style={{ borderColor: `${acCol}25` }}>
+                        <div className="text-base font-black" style={{ color: hsColor }}>{hs}/100</div>
+                        <div className="flex-1">
+                          <div className="h-2 bg-[#1A3050] rounded-full overflow-hidden">
+                            <div className="h-full rounded-full transition-all duration-700" style={{ width: `${hs}%`, background: hsColor }} />
+                          </div>
+                          <div className="text-[9px] text-[#A7B8D8] mt-0.5">Sağlık Skoru</div>
+                        </div>
+                        {brain.ogrenme && brain.ogrenme > 0 && (
+                          <div className="text-right shrink-0">
+                            <div className="text-[10px] font-semibold text-[#10B981]">📚 {brain.ogrenme}</div>
+                            <div className="text-[9px] text-[#A7B8D8]">öğrenme</div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Sorunlar Listesi */}
+                    <div className="bg-[#0A1628] rounded-xl ring-1 ring-[#2B416B] p-3">
+                      <div className="text-[10px] font-bold text-[#F2B705] mb-2 uppercase tracking-wider">
+                        {sorunlar.some(s => s.includes('🔴')) ? '🚨 Tespit Edilen Sorunlar' : sorunlar[0]?.includes('✅') ? '✅ Durum' : '⚠️ Dikkat Gerektiren Durumlar'}
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        {sorunlar.map((s: string, i: number) => (
+                          <div key={i} className="text-xs text-[#A7B8D8] flex items-start gap-2">
+                            <span className="mt-0.5 shrink-0">›</span>
+                            <span className="leading-relaxed">{s}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Beyin gerekçeleri */}
+                    {Array.isArray(brain.sebepler) && brain.sebepler.length > 0 && (
+                      <div className="bg-[#0A1628] rounded-xl ring-1 ring-[#2B416B] p-3">
+                        <div className="text-[10px] font-bold text-[#2E86FF] mb-2">📋 Beyin Gerekçeleri</div>
+                        {(brain.sebepler as string[]).map((s: string, i: number) => (
+                          <div key={i} className="text-xs text-[#A7B8D8] flex items-start gap-2 mt-1">
+                            <span className="text-[#2E86FF] mt-0.5 shrink-0">→</span><span>{s}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Çoklu ATM özet tablosu */}
+                {atms.length > 1 && (
+                  <div className="rounded-xl ring-1 ring-[#8B5CF6]/20 overflow-hidden">
+                    <div className="px-4 py-2 bg-[#0D1F3C] text-xs font-bold text-[#A7B8D8]">📋 Tüm ATM'ler ({atms.length} adet)</div>
+                    <table className="w-full text-xs">
+                      <thead><tr className="bg-[#0A1628]">
+                        <th className="px-3 py-2 text-left text-[#A7B8D8]">ATM</th>
+                        <th className="px-3 py-2 text-center text-[#A7B8D8]">Sağlık</th>
+                        <th className="px-3 py-2 text-center text-[#A7B8D8]">Karar</th>
+                        <th className="px-3 py-2 text-left text-[#A7B8D8]">Sorunlar</th>
+                      </tr></thead>
+                      <tbody>
+                        {atms.map((a: any, i: number) => {
+                          const ahs = a.health_score ?? 100;
+                          const aColor = ahs >= 80 ? '#10B981' : ahs >= 55 ? '#F2B705' : '#EF4444';
+                          const aAciliyet = a.brain?.aciliyet ?? a.beyin_oneri?.aciliyet ?? 'DUSUK';
+                          const aBadgeColor = aciliyetColor(aAciliyet);
+                          return (
+                            <tr key={i} className="border-t border-[#1A3050]">
+                              <td className="px-3 py-2 font-bold text-white font-mono">{a.terminal_id}</td>
+                              <td className="px-3 py-2 text-center font-black" style={{ color: aColor }}>{ahs}/100</td>
+                              <td className="px-3 py-2 text-center">
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold text-white" style={{ background: aBadgeColor }}>
+                                  {aAciliyet}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-[#A7B8D8] text-[10px] max-w-xs truncate">{(a.sorunlar ?? [])[0] ?? '✅ Normal'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Footer */}
+                <div className="flex items-center justify-between text-[10px] text-[#A7B8D8] px-1">
+                  <span>Log: <strong className="text-white">{source_file}</strong> • {parsed_rows.toLocaleString('tr-TR')} satır</span>
+                  <span className={Object.keys(brain).length > 0 ? 'text-[#10B981] font-semibold' : 'text-[#F2B705] font-semibold'}>
+                    {Object.keys(brain).length > 0 ? '🧠 AI Beyin Aktif' : '⚡ Beyin Kapalı'}
+                  </span>
                 </div>
               </div>
             );
@@ -1731,7 +2541,7 @@ export default function OverviewPage() {
                 <div className="text-xs text-[#EF4444] bg-[#EF4444]/10 ring-1 ring-[#EF4444]/30 rounded-lg px-4 py-2">❌ {brmLogError}</div>
               )}
               <div className="text-sm text-[#A7B8D8]">Vendor log analizi için yukarıdaki <strong className="text-white">"Log Yükle"</strong> butonuna basın.</div>
-              <div className="text-xs text-[#A7B8D8]/60">Format: Hyosung / Nautilus BRM log (.txt) • AI Beyin arıza örüntüsü tespit eder</div>
+              <div className="text-xs text-[#A7B8D8]/60">Format: Hyosung / Nautilus BRM log (.txt) • IDC kart okuyucu log (.txt) • AI Beyin arıza örüntüsü tespit eder</div>
             </div>
           )}
         </div>
