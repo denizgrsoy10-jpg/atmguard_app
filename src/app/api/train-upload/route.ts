@@ -111,7 +111,7 @@ export async function POST(req: NextRequest) {
       // Beyne gönder: /api/v1/xfs-log-raw
       let beyinSonucu: Record<string, unknown> | null = null;
       try {
-        const beyinRes = await fetch("http://localhost:8000/api/v1/xfs-log-raw", {
+        const beyinRes = await fetch(`${process.env.BRAIN_API_URL ?? 'http://localhost:8000'}/api/v1/xfs-log-raw`, {
           method : "POST",
           headers: { "Content-Type": "application/json" },
           body   : JSON.stringify({ raw_log: rawText }),
@@ -178,7 +178,7 @@ export async function POST(req: NextRequest) {
     // Dosya kaydedildi → şimdi beyin motoruna besle
     let beyinSonucu: Record<string, unknown> | null = null;
     try {
-      const beyinRes = await fetch("http://localhost:8000/api/v1/toplu-ogret", {
+      const beyinRes = await fetch(`${process.env.BRAIN_API_URL ?? 'http://localhost:8000'}/api/v1/toplu-ogret`, {
         method : "POST",
         headers: { "Content-Type": "application/json" },
         body   : JSON.stringify({ dosya_adi: fname }),

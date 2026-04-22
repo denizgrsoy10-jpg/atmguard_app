@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import * as XLSX from 'xlsx';
+
+const BRAIN_URL = process.env.NEXT_PUBLIC_BRAIN_URL ?? 'http://localhost:8000';
 import KpiRow from "@/components/KpiRow";
 import OverviewBottomStrip from "@/components/OverviewBottomStrip";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -932,7 +934,7 @@ export default function OverviewPage() {
                     if (manualFlmThreshold)  body.flm_esik_saat   = parseFloat(manualFlmThreshold);
                     if (manualSlmRisk)       body.slm_risk_yuzde  = parseFloat(manualSlmRisk);
                     if (manualLearningNote)  body.ogrenme_notu    = manualLearningNote;
-                    const r = await fetch('http://localhost:8000/api/v1/beyin/kural', {
+                    const r = await fetch(`${BRAIN_URL}/api/v1/beyin/kural`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify(body),
@@ -947,7 +949,7 @@ export default function OverviewPage() {
                       alert(`⚠️ ${d.mesaj}`);
                     }
                   } catch {
-                    alert('⚠️ Beyin sunucusu bağlantısı kurulamadı (localhost:8000)');
+                    alert(`⚠️ Beyin sunucusu bağlantısı kurulamadı (${BRAIN_URL})`);
                   }
                 }}
                 className="px-5 py-2.5 bg-gradient-to-r from-[#F2B705] to-[#F59E0B] hover:from-[#F59E0B] hover:to-[#F2B705] text-white text-sm font-bold rounded-lg transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
@@ -1257,7 +1259,7 @@ export default function OverviewPage() {
               onClick={async () => {
                 setProaktifLoading(true);
                 try {
-                  const r = await fetch('http://localhost:8000/api/v1/ozet');
+                  const r = await fetch(`${BRAIN_URL}/api/v1/ozet`);
                   if (r.ok) {
                     const d = await r.json();
                     setProaktifOzet(d.proaktif ?? null);
@@ -1336,7 +1338,7 @@ export default function OverviewPage() {
               onClick={async () => {
                 setBrainVerLoading(true);
                 try {
-                  const r = await fetch('http://localhost:8000/api/v1/beyin/versiyonlar');
+                  const r = await fetch(`${BRAIN_URL}/api/v1/beyin/versiyonlar`);
                   if (r.ok) {
                     const d = await r.json();
                     setBrainSnapshots(d.snapshots ?? []);
@@ -1444,11 +1446,11 @@ export default function OverviewPage() {
                             setBrainRollbackVer(s.versiyon);
                             setBrainRollbackStatus('loading');
                             try {
-                              const r = await fetch(`http://localhost:8000/api/v1/beyin/geri-yukle/${s.versiyon}`, { method: 'POST' });
+                              const r = await fetch(`${BRAIN_URL}/api/v1/beyin/geri-yukle/${s.versiyon}`, { method: 'POST' });
                               if (r.ok) {
                                 setBrainRollbackStatus('success');
                                 // Listeyi güncelle
-                                const r2 = await fetch('http://localhost:8000/api/v1/beyin/versiyonlar');
+                                const r2 = await fetch(`${BRAIN_URL}/api/v1/beyin/versiyonlar`);
                                 if (r2.ok) { const d = await r2.json(); setBrainSnapshots(d.snapshots ?? []); setBrainHafiza(d.hafiza ?? null); }
                               } else { setBrainRollbackStatus('error'); }
                             } catch { setBrainRollbackStatus('error'); }

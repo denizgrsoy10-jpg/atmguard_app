@@ -30,9 +30,10 @@ export async function POST(request: NextRequest) {
     const parsed = JSON.parse(stdout);
 
     // ── Call real AI Brain for actual decision ──────────────────────────────
+    const BRAIN_BASE_URL = process.env.BRAIN_API_URL ?? 'http://localhost:8000';
     let brain_verdict: Record<string, unknown> | null = null;
     try {
-      const brainRes = await fetch('http://localhost:8000/api/v1/brm-log-analiz', {
+      const brainRes = await fetch(`${BRAIN_BASE_URL}/api/v1/brm-log-analiz`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
