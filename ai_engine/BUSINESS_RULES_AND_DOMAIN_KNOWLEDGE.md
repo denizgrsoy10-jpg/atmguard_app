@@ -63,6 +63,22 @@ Arıza Tipleri:
 
 ---
 
+## 💳 MÜŞTERİ PARA ÇEKME LİMİTİ
+
+```
+Kart başına GÜNLÜK azami çekim: 50.000 TL
+Güncelleme: 16 Haziran 2026 (önceki değer güncellendi)
+```
+
+**Operasyonel anlamı:**
+- Tek bir ATM, bir kişi tarafından günde en fazla 50.000 TL boşaltılabilir.
+- İkmal planlaması ve günlük tüketim üst sınırı için referans değer.
+- Kod karşılığı: `BusinessRules.CEKIM_LIMITI_GUNLUK_TL` (atm_brain_orchestrator.py)
+- DİKKAT: Bu, `NAKIT_KRITIK_ESIK` (ATM bakiye ikmal eşiği) ile **aynı değildir** —
+  ikisi tesadüfen 50.000 TL olabilir ama farklı kavramlardır.
+
+---
+
 ## 💰 ATM KASA YAPISI
 
 ### Recycle Kasetler (Yatırılan Para - Biriken)

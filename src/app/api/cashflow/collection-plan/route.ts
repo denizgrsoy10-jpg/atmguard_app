@@ -15,6 +15,9 @@
 import { NextResponse } from "next/server";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { getBrainKararlar, brainHasData, isToplamaKarari } from "@/lib/brain";
+
+export const dynamic = "force-dynamic";
 
 // ── Tip Tanımları ──────────────────────────────────────────────────────────────
 
@@ -69,6 +72,7 @@ export type CollectionSuggestion = {
 
 export type CollectionPlanResponse = {
   generated_at: string;
+  _source?: "brain" | "mock";        // beyin önceliklendirdi mi?
   high_cash_atms: CollectionATM[];   // doluluk > 85% — haritada gösterilecek
   collection_suggestions: CollectionSuggestion[]; // öneri planı
   summary: {
@@ -290,6 +294,34 @@ export async function GET() {
         };
       });
 
+    // 4b. BEYİN ÖNCELİKLENDİRME — beyin "topla" dediği ATM'leri öne al + işaretle
+    //     (Kaset-doluluk detayı kapasiteden gelir; beyin sadece ÖNCELİĞİ belirler.)
+    let source: "brain" | "mock" = "mock";
+    const kararlar = await getBrainKararlar();
+    if (brainHasData(kararlar)) {
+      const beyinToplamaIds = new Set(
+        kararlar.kararlar.filter(isToplamaKarari).map((k) => k.terminal_id)
+      );
+      if (beyinToplamaIds.size > 0) {
+        let etkilendi = false;
+        for (const s of suggestions) {
+          if (beyinToplamaIds.has(s.atmId)) {
+            etkilendi = true;
+            s.priority = "high";
+            s.confidence = Math.max(s.confidence, 95);
+            if (!s.reason.startsWith("🧠")) s.reason = `🧠 Beyin: topla — ${s.reason}`;
+          }
+        }
+        // Beyin işaretlileri en üste taşı
+        suggestions.sort((a, b) => {
+          const ab = beyinToplamaIds.has(a.atmId) ? 1 : 0;
+          const bb = beyinToplamaIds.has(b.atmId) ? 1 : 0;
+          return bb - ab;
+        });
+        if (etkilendi) source = "brain";
+      }
+    }
+
     // 5. Özet istatistikler
     const summary = {
       total_deposit_capable: depositAtms.length,
@@ -303,6 +335,7 @@ export async function GET() {
 
     const response: CollectionPlanResponse = {
       generated_at: now.toISOString(),
+      _source: source,
       high_cash_atms: highCashAtms,
       collection_suggestions: suggestions,
       summary,

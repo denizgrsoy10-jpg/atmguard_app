@@ -19,6 +19,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -30,7 +32,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 # Kendi motorlarımız
-from atm_brain_orchestrator import ATMBrainOrchestrator, BeyinKarari, BusinessRules
+from atm_brain_orchestrator import (
+    ATMBrainOrchestrator,
+    BeyinKarari,
+    BusinessRules,
+    atomik_json_yaz,
+)
 
 # ─── Logging ────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -91,6 +98,9 @@ _IDC_LOG_HAFIZA  = _LOG_HAFIZA_DIR / "idc_log_history.json"
 _XFS_LOG_HAFIZA  = _LOG_HAFIZA_DIR / "xfs_log_history.json"
 _log_hafiza_yuklendi: bool = False
 
+# Kümülatif log dict'lerine eşzamanlı erişim kilidi (threadpool endpoint'leri için)
+_log_lock = threading.RLock()
+
 
 def _log_hafiza_yukle() -> None:
     """BRM ve IDC kümülatif geçmişlerini diskten yükler (server startup'ta bir kez)."""
@@ -123,24 +133,26 @@ def _log_hafiza_yukle() -> None:
 
 
 def _log_hafiza_kaydet(log_turu: str) -> None:
-    """Güncel kümülatif geçmişi diske yazar. log_turu: 'brm', 'idc' veya 'xfs'."""
+    """Güncel kümülatif geçmişi diske yazar. log_turu: 'brm', 'idc' veya 'xfs'.
+
+    Kilit altında çalışır: serialize sırasında başka bir thread dict'i
+    değiştirip tutarsız anlık görüntü (veya iteration hatası) oluşturamaz.
+    """
     try:
         _LOG_HAFIZA_DIR.mkdir(parents=True, exist_ok=True)
-        if log_turu == "brm":
-            with open(_BRM_LOG_HAFIZA, "w", encoding="utf-8") as f:
-                json.dump(_brm_kumulatif, f, ensure_ascii=False)
-            toplam = sum(len(v) for v in _brm_kumulatif.values())
-            logger.info(f"💾 BRM log geçmişi kaydedildi — {len(_brm_kumulatif)} ATM, {toplam} kayıt")
-        elif log_turu == "xfs":
-            with open(_XFS_LOG_HAFIZA, "w", encoding="utf-8") as f:
-                json.dump(_xfs_kumulatif, f, ensure_ascii=False)
-            toplam = sum(len(v) for v in _xfs_kumulatif.values())
-            logger.info(f"💾 XFS log geçmişi kaydedildi — {len(_xfs_kumulatif)} ATM, {toplam} kayıt")
-        else:
-            with open(_IDC_LOG_HAFIZA, "w", encoding="utf-8") as f:
-                json.dump(_idc_kumulatif, f, ensure_ascii=False)
-            toplam = sum(len(v) for v in _idc_kumulatif.values())
-            logger.info(f"💾 IDC log geçmişi kaydedildi — {len(_idc_kumulatif)} ATM, {toplam} kayıt")
+        with _log_lock:
+            if log_turu == "brm":
+                atomik_json_yaz(_BRM_LOG_HAFIZA, _brm_kumulatif, indent=None)
+                toplam = sum(len(v) for v in _brm_kumulatif.values())
+                logger.info(f"💾 BRM log geçmişi kaydedildi — {len(_brm_kumulatif)} ATM, {toplam} kayıt")
+            elif log_turu == "xfs":
+                atomik_json_yaz(_XFS_LOG_HAFIZA, _xfs_kumulatif, indent=None)
+                toplam = sum(len(v) for v in _xfs_kumulatif.values())
+                logger.info(f"💾 XFS log geçmişi kaydedildi — {len(_xfs_kumulatif)} ATM, {toplam} kayıt")
+            else:
+                atomik_json_yaz(_IDC_LOG_HAFIZA, _idc_kumulatif, indent=None)
+                toplam = sum(len(v) for v in _idc_kumulatif.values())
+                logger.info(f"💾 IDC log geçmişi kaydedildi — {len(_idc_kumulatif)} ATM, {toplam} kayıt")
     except Exception as e:
         logger.error(f"Log hafızası kaydetme hatası ({log_turu}): {e}")
 
@@ -265,6 +277,8 @@ class OzetResponse(BaseModel):
     """Özet istatistikler (proaktif tahmin dahil)."""
     zaman: str
     toplam_atm: int
+    toplam_nakit_tl: float = 0.0      # sahadaki toplam nakit (tl_bakiye + recycle)
+    izlenen_bakiye_atm: int = 0       # bakiye feed'i gelen ATM sayısı
     kritik_atm: int
     yuksek_atm: int
     kombine_servis: int
@@ -1767,14 +1781,32 @@ async def startup_scheduler():
 # ═══════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
+    # ── Sunucu ayarları (env ile kontrol edilir) ─────────────────────────────
+    # Banka/prod ortamında reload KAPALI olmalı: dosya değişiminde restart
+    # bellekteki beyin state'ini (aktif arıza, bakiye, karar geçmişi) uçurur.
+    # Beyin singleton olduğu için workers HER ZAMAN 1 — birden fazla worker
+    # process'i her biri kendi beynini açar, hafıza tutarsızlaşır.
+    host  = os.getenv("BRAIN_HOST", "0.0.0.0")
+    port  = int(os.getenv("BRAIN_PORT", "8000"))
+    # Geliştirme için: BRAIN_RELOAD=1. Varsayılan (prod): kapalı.
+    reload = os.getenv("BRAIN_RELOAD", "0").lower() in ("1", "true", "yes")
+
     print("\n" + "═" * 65)
     print("  ATM GUARD — API SERVER")
     print("═" * 65)
-    print("  Swagger (tüm endpoint'ler):  http://localhost:8000/docs")
-    print("  ReDoc:                        http://localhost:8000/redoc")
-    print("  Format rehberi:               http://localhost:8000/api/v1/format-rehberi")
-    print("  Sağlık kontrolü:              http://localhost:8000/api/v1/saglik")
+    print(f"  Swagger (tüm endpoint'ler):  http://{host}:{port}/docs")
+    print(f"  ReDoc:                        http://{host}:{port}/redoc")
+    print(f"  Format rehberi:               http://{host}:{port}/api/v1/format-rehberi")
+    print(f"  Sağlık kontrolü:              http://{host}:{port}/api/v1/saglik")
     print("═" * 65)
-    print("  Yazılım ekibine bu adresi ver: http://SUNUCU_IP:8000/docs")
+    print(f"  Mod: {'GELİŞTİRME (reload açık)' if reload else 'PROD (reload kapalı, tek worker)'}")
+    print("  Yazılım ekibine bu adresi ver: http://SUNUCU_IP:%d/docs" % port)
     print("═" * 65 + "\n")
-    uvicorn.run("api_server:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
+    uvicorn.run(
+        "api_server:app",
+        host=host,
+        port=port,
+        reload=reload,
+        workers=1,          # Beyin singleton — asla >1 olmamalı
+        log_level=os.getenv("BRAIN_LOG_LEVEL", "info"),
+    )

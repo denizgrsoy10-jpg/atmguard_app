@@ -30,6 +30,14 @@ type Alert = {
   eta: string;
 };
 
+type OpsSummary = {
+  open_alerts: number;
+  high: number;
+  medium: number;
+  low: number;
+  slm_opened: number;
+};
+
 type Operator = {
   id: string;
   name: string;
@@ -64,6 +72,7 @@ type PersonnelShift = {
 
 export default function CommandCenterPage() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [opsSummary, setOpsSummary] = useState<OpsSummary | null>(null);
   const [atms, setAtms] = useState<ATM[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
@@ -795,39 +804,71 @@ Otomatik Eskalasyon Sistemi
     let alive = true;
     (async () => {
       try {
-        const r = await fetch("/api/atm-master", { cache: "no-store" });
-        const j = await r.json();
+        // atm-master (kadro/bölge) + beyin SLM sevk kararları paralel çekilir
+        const [amRes, ccRes] = await Promise.all([
+          fetch("/api/atm-master", { cache: "no-store" }),
+          fetch("/api/command-center", { cache: "no-store" }),
+        ]);
+        const j = await amRes.json();
         const atmList = (j.atms || []) as ATM[];
         const activeAtms = atmList.filter((a) => a.active !== false);
 
         if (!alive) return;
         setAtms(activeAtms);
 
-        const titles = ["CCDM Jam Tekrarı", "Sensor / Reset Etkisiz", "Network Timeout"] as const;
-        const summaries = [
-          "Son 7 günde 3 FLM + jam trendi",
-          "Reset sonrası hata tekrarı",
-          "Bağlantı kopmaları artıyor",
-        ] as const;
-        const actions = ["Dispatch SLM", "Remote Check", "Monitor"] as const;
-        const etas = ["Today", "24h", "48h"] as const;
-        const severities = ["High", "Medium", "Low"] as const;
+        // ── CANLI: beyin beslenmişse SLM sevk kararlarını al ─────────────────
+        let cc: { alerts?: Alert[]; ops_summary?: OpsSummary } = {};
+        try {
+          cc = await ccRes.json();
+        } catch {
+          cc = {};
+        }
+        if (alive && cc.ops_summary) setOpsSummary(cc.ops_summary);
 
-        const mapped = activeAtms.slice(0, 3).map((a, idx) => ({
-          id: `A-${1001 + idx}`,
+        const brainAlerts: Alert[] = (cc.alerts || []).map((a) => ({
+          id: String(a.id),
           atm_id: String(a.atm_id),
-          atm_name: a.atm_name || "N/A",
+          atm_name: a.atm_name || `ATM ${a.atm_id}`,
           city: a.city,
           district: a.district,
-          severity: severities[idx % severities.length],
-          title: titles[idx % titles.length],
-          summary: summaries[idx % summaries.length],
-          action: actions[idx % actions.length],
-          eta: etas[idx % etas.length],
+          severity: a.severity,
+          title: a.title,
+          summary: a.summary,
+          action: a.action,
+          eta: a.eta,
         }));
 
-        if (!alive) return;
-        setAlerts(mapped);
+        if (brainAlerts.length > 0) {
+          if (!alive) return;
+          setAlerts(brainAlerts);
+        } else {
+          // ── VİTRİN: beyin kapalı/boş → eski senaryo kartları ───────────────
+          const titles = ["CCDM Jam Tekrarı", "Sensor / Reset Etkisiz", "Network Timeout"] as const;
+          const summaries = [
+            "Son 7 günde 3 FLM + jam trendi",
+            "Reset sonrası hata tekrarı",
+            "Bağlantı kopmaları artıyor",
+          ] as const;
+          const actions = ["Dispatch SLM", "Remote Check", "Monitor"] as const;
+          const etas = ["Today", "24h", "48h"] as const;
+          const severities = ["High", "Medium", "Low"] as const;
+
+          const mapped = activeAtms.slice(0, 3).map((a, idx) => ({
+            id: `A-${1001 + idx}`,
+            atm_id: String(a.atm_id),
+            atm_name: a.atm_name || "N/A",
+            city: a.city,
+            district: a.district,
+            severity: severities[idx % severities.length],
+            title: titles[idx % titles.length],
+            summary: summaries[idx % summaries.length],
+            action: actions[idx % actions.length],
+            eta: etas[idx % etas.length],
+          }));
+
+          if (!alive) return;
+          setAlerts(mapped);
+        }
       } catch {
         if (!alive) return;
         setAlerts([]);
@@ -2689,7 +2730,9 @@ Otomatik Eskalasyon Sistemi
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
             <div>
               <div className="text-xs text-[#A7B8D8] mb-1">Açık Arıza</div>
-              <div className="text-2xl font-bold text-[#EF4444]">25</div>
+              <div className="text-2xl font-bold text-[#EF4444]">
+                {opsSummary ? opsSummary.high + opsSummary.medium + opsSummary.low : 25}
+              </div>
             </div>
             <div>
               <div className="text-xs text-[#A7B8D8] mb-1">Kapanan Arıza (Bugün)</div>
@@ -2697,7 +2740,9 @@ Otomatik Eskalasyon Sistemi
             </div>
             <div>
               <div className="text-xs text-[#A7B8D8] mb-1">Bekleyen SLM</div>
-              <div className="text-2xl font-bold text-[#F59E0B]">5</div>
+              <div className="text-2xl font-bold text-[#F59E0B]">
+                {opsSummary ? opsSummary.open_alerts : 5}
+              </div>
             </div>
             <div>
               <div className="text-xs text-[#A7B8D8] mb-1">Ortalama Çözüm Süresi</div>

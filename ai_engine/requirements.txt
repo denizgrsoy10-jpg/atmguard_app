@@ -52,6 +52,15 @@ plotly==5.19.0
 pyyaml==6.0.1
 python-dotenv==1.0.1
 
+# SQL Feed Runner (banka SQL → beyin canlı hortumları)
+sqlalchemy==2.0.27          # DB-agnostik bağlantı (Oracle/MSSQL/Postgres/SQLite)
+apscheduler==3.10.4         # Zamanlanmış feed çalıştırma (--schedule)
+requests==2.31.0            # Beyin API'sine POST
+# Banka DB sürücüsü — ortama göre BİRİNİ kurun (requirements'a eklemeyin, ayrı):
+#   Oracle   → pip install oracledb
+#   MSSQL    → pip install pyodbc
+#   Postgres → pip install psycopg2-binary
+
 # Production Server (Optional - if deploying as API)
 fastapi==0.109.2
 uvicorn==0.27.1

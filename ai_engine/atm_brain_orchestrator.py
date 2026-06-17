@@ -36,8 +36,11 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
+import os
+import threading
 from datetime import datetime, timedelta, time
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field, asdict
@@ -47,6 +50,37 @@ from pathlib import Path
 import numpy as np
 
 logger = logging.getLogger("atm_brain")
+
+
+def atomik_json_yaz(path: Any, data: Any, *, indent: Optional[int] = 2) -> None:
+    """
+    JSON'u önce aynı dizinde geçici dosyaya yazar, sonra atomik rename ile
+    yerine koyar. Yazım sırasında servis çökerse hedef dosya bozulmaz —
+    eski hâli korunur. Banka içinde restart sonrası 'yarım hafıza' riskini önler.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=indent)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp.replace(path)
+
+
+def _senkron(method):
+    """
+    Beyin metodlarını re-entrant kilitle korur. FastAPI senkron endpoint'leri
+    threadpool'da paralel çalıştırır; aynı anda gelen feed POST'ları, UI
+    sorguları ve zamanlanmış işler ortak belleği (dict'leri) bozmasın diye
+    her mutasyon/karar metodu bu kilidi alır. RLock olduğu için bir metod
+    kilit altındayken başka bir korumalı metodu çağırabilir (nested güvenli).
+    """
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return wrapper
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -96,11 +130,20 @@ class BusinessRules:
     MAX_BEKLEYIS_SAAT   = 4    # Mesai dışı — en fazla 4 saat bekle
 
     # ── Nakit Eşik Değerleri (TL) ─────────────────────────────────────────────
+    # DİKKAT: Bunlar ATM BAKİYE eşikleridir (ikmal/toplama tetikleyici) —
+    #         müşteri çekme limitiyle KARIŞTIRILMAMALI (o ayrı: CEKIM_LIMITI_GUNLUK_TL).
     NAKIT_KRITIK_ESIK   = 50_000    # Altına düşünce ACIL ikmal
     NAKIT_REFILL_ESIK   = 100_000   # Altına düşünce planla
     NAKIT_TOPLAMA_ESIK  = 800_000   # Üstüne çıkınca toplama
     NAKIT_ACIL_TOPLAMA  = 1_000_000 # Üstüne çıkınca ACIL toplama
     RECYCLE_DOLU_ESIK   = 0.85      # Recycle doluluk oranı (0-1)
+
+    # ── Müşteri Para Çekme Limiti ─────────────────────────────────────────────
+    # Kart başına GÜNLÜK azami para çekme tutarı (banka kuralı).
+    # Güncelleme: 16 Haziran 2026 → 50.000 TL.
+    # Operasyonel anlamı: Tek ATM bir kişi tarafından en fazla bu kadar
+    # boşaltılabilir; ikmal planlaması ve günlük tüketim üst sınırı için referans.
+    CEKIM_LIMITI_GUNLUK_TL = 50_000
 
     # ── Manuel Override Alanları (UI'dan gelen operatör kuralları) ────────────
     # Varsayılan None → kendi hesabını kullan. Set edilirse AI kararı buna göre ayarlanır.
@@ -451,9 +494,18 @@ class ATMBrainOrchestrator:
     - Hafıza: Kararlarını kaydeder, yarın daha iyi öğrenir
     """
 
+    # Aktif arıza belleğinde tutulacak maksimum yaş (gün). Banka SQL'i yalnızca
+    # "açık" arızaları gönderip 'KAPALI' event'i hiç yollamasa bile, bu süreden
+    # eski arızalar bellekten temizlenir → sonsuz büyüme (memory leak) engellenir.
+    _AKTIF_ARIZA_MAX_GUN = 7
+
     def __init__(self, model_dir: str = './models'):
         self.model_dir  = Path(model_dir)
         self.rules      = BusinessRules()
+
+        # Re-entrant kilit — eşzamanlı feed/karar/hafıza erişimini korur.
+        # @_senkron ile işaretli tüm metodlar bu kilidi kullanır.
+        self._lock = threading.RLock()
 
         # Canlı veri bellekleri
         self._terminal_tanim : Dict[str, TerminalTanim]   = {}
@@ -474,12 +526,19 @@ class ATMBrainOrchestrator:
         self._cash_motoru    = None
         self._combined       = None
 
+        # Cash beyni (UltraFinCash) durum bayrakları:
+        #   _cash_motoru_denendi → bir kez denendi mi (başarısızsa tekrar deneme)
+        #   _cash_tahmin_cache   → karar döngüsü içinde ATM başına tek tahmin
+        self._cash_motoru_denendi = False
+        self._cash_tahmin_cache: Dict[str, Optional[float]] = {}
+
         logger.info("ATM Brain Orchestrator başlatıldı.")
 
     # ──────────────────────────────────────────────────────────────────────────
     # HORTUM GİRİŞ METODLARİ — Her feed buradan gelir
     # ──────────────────────────────────────────────────────────────────────────
 
+    @_senkron
     def ingest_terminal_tanim(self, data: List[Dict]):
         """
         Terminal tanım listesini yükle.
@@ -518,6 +577,7 @@ class ATMBrainOrchestrator:
             )
         logger.info(f"Terminal tanım yüklendi: {len(self._terminal_tanim)} ATM")
 
+    @_senkron
     def ingest_ariza_feed(self, events: List[Dict]):
         """
         Online arıza raporunu al (15 dakikada bir çağrılır).
@@ -548,20 +608,64 @@ class ATMBrainOrchestrator:
             if tid not in self._aktif_arizalar:
                 self._aktif_arizalar[tid] = []
 
-            # Aynı arızayı tekrar ekleme
-            mevcut_kodlar = {e.ariza_kodu for e in self._aktif_arizalar[tid]}
-            if event.ariza_kodu not in mevcut_kodlar:
-                self._aktif_arizalar[tid].append(event)
-                yeni += 1
-
-            # Çözülmüş arızaları temizle
+            # Çözülmüş arızayı bellekten çıkar
             if event.durum == 'KAPALI':
                 self._aktif_arizalar[tid] = [
                     e for e in self._aktif_arizalar[tid]
                     if e.ariza_kodu != event.ariza_kodu
                 ]
+                continue
 
-        logger.info(f"Arıza feed alındı: {len(events)} kayıt, {yeni} yeni arıza")
+            # Aynı arıza kodu zaten açıksa: tekrar ekleme — mevcut kaydı GÜNCELLE.
+            # (Aksi halde tarih/süre eskide kalır, kronik tespit ve açık-süre bozulur.)
+            mevcut = next(
+                (e for e in self._aktif_arizalar[tid] if e.ariza_kodu == event.ariza_kodu),
+                None,
+            )
+            if mevcut is not None:
+                mevcut.tarih    = event.tarih
+                mevcut.aciklama = event.aciklama
+                mevcut.durum    = event.durum
+                mevcut.sure_dk  = event.sure_dk
+                if event.vendor_log:
+                    mevcut.vendor_log = event.vendor_log
+            else:
+                self._aktif_arizalar[tid].append(event)
+                yeni += 1
+
+        # ── Yaşlandırma temizliği: eski açık arızaları düşür (memory leak koruması) ──
+        temizlenen = self._aktif_arizalari_yaslandir()
+
+        logger.info(
+            f"Arıza feed alındı: {len(events)} kayıt, {yeni} yeni arıza"
+            + (f", {temizlenen} eski arıza temizlendi" if temizlenen else "")
+        )
+
+    def _aktif_arizalari_yaslandir(self, simdi: Optional[datetime] = None) -> int:
+        """
+        _AKTIF_ARIZA_MAX_GUN'den eski açık arızaları bellekten siler.
+        Banka 'KAPALI' event'i göndermese bile aktif arıza listesi şişmez.
+        Boşalan ATM anahtarları da temizlenir. Silinen kayıt sayısını döner.
+        """
+        simdi = simdi or datetime.now()
+        sinir = timedelta(days=self._AKTIF_ARIZA_MAX_GUN)
+        temizlenen = 0
+        for tid in list(self._aktif_arizalar.keys()):
+            korunan = []
+            for e in self._aktif_arizalar[tid]:
+                try:
+                    yas = simdi - e.tarih
+                except TypeError:
+                    yas = timedelta(0)   # tarih hatalıysa koru
+                if yas <= sinir:
+                    korunan.append(e)
+                else:
+                    temizlenen += 1
+            if korunan:
+                self._aktif_arizalar[tid] = korunan
+            else:
+                del self._aktif_arizalar[tid]
+        return temizlenen
 
     @staticmethod
     def _safe_float(val, default: float = 0.0) -> float:
@@ -574,6 +678,7 @@ class ATMBrainOrchestrator:
         except Exception:
             return default
 
+    @_senkron
     def ingest_bakiye_feed(self, snapshots: List[Dict]):
         """
         Online nakit bakiye hortumunu al.
@@ -614,6 +719,7 @@ class ATMBrainOrchestrator:
 
         logger.info(f"Bakiye feed alındı: {len(snapshots)} ATM güncellendi")
 
+    @_senkron
     def ingest_gunson(self, kayitlar: List[Dict]):
         """
         Gece 03:00'de gelen günsonu verisi.
@@ -845,6 +951,7 @@ class ATMBrainOrchestrator:
     # ANA KARAR DÖNGÜSÜ — Tüm ATM'leri tarar, kararları üretir
     # ──────────────────────────────────────────────────────────────────────────
 
+    @_senkron
     def run_full_decision_cycle(
         self,
         atm_listesi: Optional[List[str]] = None,
@@ -871,6 +978,9 @@ class ATMBrainOrchestrator:
         )
 
         logger.info(f"Karar döngüsü başlatıldı: {len(tum_atm_idler)} ATM, {simdi}")
+
+        # Cash beyni tahmin önbelleğini her döngü başında sıfırla (taze tahmin)
+        self._cash_tahmin_cache.clear()
 
         kararlar: List[BeyinKarari] = []
 
@@ -1049,6 +1159,91 @@ class ATMBrainOrchestrator:
 
         return proaktif_kararlar
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # CASH BEYNİ (UltraFinCash) — Nakit tüketim tahmini
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _cash_veri_yolu(self) -> Optional[Path]:
+        """
+        UltraFinCash motorunun beslendiği kasa raporu dosyasını bulur.
+        CASH_BRAIN_DATA env'i verilmişse YALNIZCA o kullanılır (kesin override);
+        yoksa standart konumlar denenir.
+        """
+        env_yol = os.getenv("CASH_BRAIN_DATA")
+        if env_yol:
+            p = Path(env_yol)
+            return p if p.exists() else None
+        for aday in (
+            self.model_dir.parent.parent / "kasa_durum_raporu.json",  # repo kökü
+            self.model_dir.parent / "kasa_durum_raporu.json",
+            Path("kasa_durum_raporu.json"),
+        ):
+            if aday.exists():
+                return aday
+        return None
+
+    def _cash_motoru_yukle(self):
+        """
+        Cash beynini (UltraFinCash) lazy + guard'lı yükler.
+
+        "Yapıyı bozmadan" sözleşmesi:
+          • CASH_BRAIN_ENABLE=0 → hiç yüklenmez (anlık kill-switch)
+          • Ağır kütüphane (Prophet/TF/XGB/LGB) yoksa → None
+          • Veri dosyası yoksa veya init hata verirse → None
+          • Bir kez başarısız olursa tekrar denenmez (pahalı yükleme korunur)
+        None dönerse karar mekanizması olduğu gibi kural tabanlı çalışır.
+        """
+        if self._cash_motoru is not None:
+            return self._cash_motoru
+        if self._cash_motoru_denendi:
+            return None
+        self._cash_motoru_denendi = True
+
+        if os.getenv("CASH_BRAIN_ENABLE", "1").lower() in ("0", "false", "no"):
+            logger.info("Cash beyni kapalı (CASH_BRAIN_ENABLE=0) — nakit kararları kural tabanlı.")
+            return None
+
+        veri = self._cash_veri_yolu()
+        if veri is None:
+            logger.warning("Cash beyni veri dosyası bulunamadı — kural tabanlı nakite düşüldü.")
+            return None
+
+        try:
+            from cashflow_ultra_nirvana import UltraFinCashEngine
+            engine = UltraFinCashEngine(data_path=str(veri))
+            self._cash_motoru = engine
+            logger.info(f"✅ Cash beyni yüklendi (UltraFinCash) — AI nakit tahmini aktif | {veri}")
+            return engine
+        except Exception as e:
+            logger.warning(f"Cash beyni yüklenemedi (kural tabanlı nakite düşüldü): {e}")
+            return None
+
+    def _cash_gunluk_tuketim_tahmin(self, tid: str) -> Optional[float]:
+        """
+        Cash beyninden bu ATM için günlük nakit tüketim tahminini (TL/gün) alır.
+        Karar döngüsü başına ATM başına bir kez hesaplanır (cache). Her türlü
+        hatada None döner → çağıran kural tabanlı heuristic'i kullanır.
+        """
+        if tid in self._cash_tahmin_cache:
+            return self._cash_tahmin_cache[tid]
+        engine = self._cash_motoru_yukle()
+        if engine is None:
+            self._cash_tahmin_cache[tid] = None
+            return None
+        gunluk: Optional[float] = None
+        try:
+            sonuc = engine.predict_ultra(tid, days=7)
+            tahminler = getattr(sonuc, "best_predictions", None)
+            if tahminler:
+                deger = float(np.mean(tahminler))
+                if deger > 0:
+                    gunluk = deger
+        except Exception as e:
+            logger.debug(f"Cash tahmin atlandı [{tid}]: {e}")
+            gunluk = None
+        self._cash_tahmin_cache[tid] = gunluk
+        return gunluk
+
     def _xgb_motoru_yukle(self):
         """XGBoost motorunu lazy load et. Hata olursa None döner (proaktif atlanır)."""
         if self._ariza_motoru is not None:
@@ -1217,6 +1412,19 @@ class ATMBrainOrchestrator:
             tl_bakiye    = bakiye.tl_bakiye
             recycle_dol  = (bakiye.recycle_bakiye / 1_000_000) if bakiye.recycle_bakiye > 0 else 0
             yatan_var    = bakiye.yatan_para > 50_000
+
+            # ── CASH BEYNİ: öğrenilmiş tüketim yoksa AI tahminiyle doldur ──────────
+            # Öğrenilmiş gerçek tüketim (gunluk_tuketim_tl) varsa ona dokunmayız.
+            # Yoksa, ham heuristic (tl_bakiye/10_000) yerine cash beyninin tahminini
+            # kullanırız → ETA çok daha isabetli olur. Cash beyni yoksa değişiklik yok.
+            if gunluk_tuketim <= 0:
+                ai_gunluk = self._cash_gunluk_tuketim_tahmin(tid)
+                if ai_gunluk and ai_gunluk > 0:
+                    gunluk_tuketim = ai_gunluk
+                    sebepler.append(
+                        f"🧠 Cash beyni tüketim tahmini: {ai_gunluk/1000:.0f}K TL/gün "
+                        f"(öğrenilmiş veri yok — AI tahminiyle ETA hesaplandı)"
+                    )
 
             # Kritik nakit düşük
             if tl_bakiye <= BusinessRules.NAKIT_KRITIK_ESIK:
@@ -1604,6 +1812,7 @@ class ATMBrainOrchestrator:
     # Bu metodlar canlı hortumlardan bağımsız çalışır; beyni geçmişle eğitir.
     # ──────────────────────────────────────────────────────────────────────────
 
+    @_senkron
     def ingest_gecmis_ariza(self, data: List[Dict]) -> Dict:
         """
         Toplu geçmiş arıza verisi — beyin arıza kalıplarını öğrenir.
@@ -1685,6 +1894,7 @@ class ATMBrainOrchestrator:
             "ogrenme_detay"   : ogrenme_detay,
         }
 
+    @_senkron
     def ingest_gecmis_nakit(self, data: List[Dict], veri_turu: str) -> Dict:
         """
         Toplu geçmiş nakit verisi — beyin nakit tüketim kalıplarını öğrenir.
@@ -1854,6 +2064,7 @@ class ATMBrainOrchestrator:
             yuklenen += 1
         return yuklenen
 
+    @_senkron
     def hafiza_kaydet(self, aciklama: str = "") -> str:
         """
         Beynin öğrendiklerini kalıcı olarak JSON'a yazar.
@@ -1873,11 +2084,11 @@ class ATMBrainOrchestrator:
             "ogrenilen"  : ogrenilen,
         }
         hafiza_path = self.model_dir / self._HAFIZA_DOSYASI
-        with open(hafiza_path, "w", encoding="utf-8") as f:
-            json.dump(hafiza, f, ensure_ascii=False, indent=2)
+        atomik_json_yaz(hafiza_path, hafiza)
         logger.info(f"✅ Beyin hafızası kaydedildi → {len(ogrenilen)} ATM | {hafiza_path}")
         return versiyon
 
+    @_senkron
     def hafiza_yukle(self) -> Dict:
         """
         Daha önce kaydedilmiş hafızayı yükler.
@@ -1909,6 +2120,7 @@ class ATMBrainOrchestrator:
             logger.error(f"Hafıza yükleme hatası: {e}")
             return {"durum": "hata", "mesaj": str(e)}
 
+    @_senkron
     def snapshot_al(self, aciklama: str = "") -> str:
         """
         Versiyonlanmış anlık kopya alır.
@@ -1930,8 +2142,7 @@ class ATMBrainOrchestrator:
             "ogrenilen"  : ogrenilen,
         }
         snap_path = snap_dir / f"snapshot_{versiyon}.json"
-        with open(snap_path, "w", encoding="utf-8") as f:
-            json.dump(snap, f, ensure_ascii=False, indent=2)
+        atomik_json_yaz(snap_path, snap)
         # Son 20 snapshot tut, eskilerini sil
         tum_snaplar = sorted(snap_dir.glob("snapshot_*.json"))
         if len(tum_snaplar) > 20:
@@ -1966,6 +2177,7 @@ class ATMBrainOrchestrator:
                 pass
         return result
 
+    @_senkron
     def snapshot_yukle(self, versiyon: str) -> Dict:
         """
         Belirtilen snapshot versiyonuna geri döner.
@@ -2029,6 +2241,7 @@ class ATMBrainOrchestrator:
             "hafiza_dosyasi"     : str(hafiza_path),
         }
 
+    @_senkron
     def geri_bildirim_ver(
         self,
         terminal_id: str,
@@ -2065,9 +2278,16 @@ class ATMBrainOrchestrator:
         proaktif_mudahale  = [k for k in kararlar if k.eylem == 'PROAKTIF_MUDAHALE']
         proaktif_izle      = [k for k in kararlar if k.eylem == 'PROAKTIF_IZLE']
         xgb_aktif          = self._ariza_motoru is not None
+        # Sahadaki toplam nakit: dispense (tl_bakiye) + recycle kaseti
+        toplam_nakit_tl = sum(
+            (b.tl_bakiye or 0) + (getattr(b, 'recycle_bakiye', 0) or 0)
+            for b in self._son_bakiye.values()
+        )
         return {
             'zaman'              : datetime.now().isoformat(),
             'toplam_atm'         : len(kararlar),
+            'toplam_nakit_tl'    : float(toplam_nakit_tl),
+            'izlenen_bakiye_atm' : len(self._son_bakiye),
             'kritik_atm'         : sum(1 for k in kararlar if k.aciliyet == 'KRITIK'),
             'yuksek_atm'         : sum(1 for k in kararlar if k.aciliyet == 'YUKSEK'),
             'kombine_servis'     : sum(1 for k in kararlar if k.eylem == 'COMBINED_SERVICE'),

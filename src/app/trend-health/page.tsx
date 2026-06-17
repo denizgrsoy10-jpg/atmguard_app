@@ -569,6 +569,12 @@ type HealthPayload = {
 
   threshold: { current: number; recommended: number };
   pr_curve: PrPoint[];
+
+  // Beyin durumu (opsiyonel — route ekler)
+  _source?: "brain" | "mock";
+  _brain_yuklenen_atm?: number;
+  _brain_aktif_ariza?: number;
+  _brain_bakiye_kaydi?: number;
 };
 
 function MetricCard({ label, value }: { label: string; value: string }) {
@@ -709,7 +715,18 @@ export default function TrendHealthPage() {
 
       {/* Motor Performans Metrikleri */}
       <div className="bg-[#112544] rounded-2xl p-4 ring-1 ring-[#2B416B]">
-        <div className="text-sm font-semibold mb-4">⚙️ Motor Performans Metrikleri / AI Engine Performance Metrics</div>
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-sm font-semibold">⚙️ Motor Performans Metrikleri / AI Engine Performance Metrics</div>
+          {data?._source === "brain" ? (
+            <span className="text-[10px] px-2.5 py-1 rounded-full bg-[#10B981]/20 text-[#10B981] font-semibold">
+              ● CANLI · {data._brain_yuklenen_atm ?? 0} ATM izleniyor · {data._brain_aktif_ariza ?? 0} aktif arıza
+            </span>
+          ) : (
+            <span className="text-[10px] px-2.5 py-1 rounded-full bg-[#F59E0B]/20 text-[#F59E0B] font-semibold">
+              ○ Vitrin — ML kalite metrikleri örnek (model-monitoring beslenince canlanır)
+            </span>
+          )}
+        </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-4">
           <div className="bg-[#0E2142] rounded-xl p-3 ring-1 ring-[#2B416B] relative group">
             <button

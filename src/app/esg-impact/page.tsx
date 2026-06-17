@@ -213,13 +213,30 @@ interface ATMData {
   };
 }
 
+type EsgBrain = {
+  optimization_rate: number;
+  kombine_servis: number;
+  toplam_karar: number;
+  _source: 'brain' | 'mock';
+};
+
 export default function ESGImpactPage() {
   const [esgData, setEsgData] = useState<ESGMetrics | null>(null);
   const [loading, setLoading] = useState(true);
+  const [esgBrain, setEsgBrain] = useState<EsgBrain | null>(null);
 
   useEffect(() => {
     async function loadATMData() {
       try {
+        // Optimizasyon oranını beyinden al (kombine servis oranı) — kapalıysa vitrin
+        let optimizationRate = 0.25;
+        try {
+          const oR = await fetch('/api/esg-impact', { cache: 'no-store' });
+          const oJ = (await oR.json()) as EsgBrain;
+          setEsgBrain(oJ);
+          if (oJ?.optimization_rate > 0) optimizationRate = oJ.optimization_rate;
+        } catch {}
+
         // Budget Performance ile aynı CSV'yi kullan
         const response = await fetch('/api/atm-data');
         const result = await response.json();
@@ -260,8 +277,8 @@ export default function ESGImpactPage() {
           }
         });
 
-        // Gerçek verilerden ESG hesabı
-        calculateRealESG(atmList);
+        // Gerçek verilerden ESG hesabı (beyin kombine oranıyla)
+        calculateRealESG(atmList, optimizationRate);
       } catch (error) {
         console.error('CSV yükleme hatası:', error);
         // Hata durumunda mock data kullan
@@ -272,7 +289,7 @@ export default function ESGImpactPage() {
       }
     }
 
-    function calculateRealESG(atms: ATMData[]) {
+    function calculateRealESG(atms: ATMData[], optimizationRate: number) {
       // Tüm ATM'ler için toplam yıllık KM hesapla
       let totalKmBefore = 0;
       let totalTripsBefore = 0;
@@ -291,12 +308,8 @@ export default function ESGImpactPage() {
         totalTripsBefore += yearlyTrips;
       });
 
-      // Akıllı optimizasyon ile tasarruf simülasyonu
-      // 1. Rota gruplama: Aynı nakit merkezindeki ATM'ler birlikte ziyaret edilir → %20 KM tasarrufu
-      // 2. Çakışma önleme: Gereksiz tekrar ziyaretler engellenir → %8 tasarruf
-      // 3. Planlı operasyonlar: Acil yerine planlı işlemler → %5 tasarruf
-      const optimizationRate = 0.25; // %25 toplam tasarruf
-      
+      // Optimizasyon oranı beyinden gelir (kombine servis oranı); beyin
+      // kapalıysa 0.25 vitrin değeri kullanılır.
       const totalKmAfter = totalKmBefore * (1 - optimizationRate);
       const totalTripsAfter = totalTripsBefore * (1 - optimizationRate);
 
@@ -401,6 +414,15 @@ export default function ESGImpactPage() {
           <p className="text-slate-300 text-lg">
             Akıllı rota optimizasyonu ile hem maliyet hem de karbon ayak izi azaltımı
           </p>
+          {esgBrain?._source === 'brain' ? (
+            <div className="inline-block text-xs px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold mt-2">
+              ● CANLI · Optimizasyon oranı beyinden: %{(esgBrain.optimization_rate * 100).toFixed(0)} · {esgBrain.kombine_servis}/{esgBrain.toplam_karar} kombine servis
+            </div>
+          ) : (
+            <div className="inline-block text-xs px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 font-semibold mt-2">
+              ○ Vitrin · %25 örnek optimizasyon (beyin beslenince kombine oranıyla canlanır)
+            </div>
+          )}
           <div className="flex items-center justify-center gap-4 mt-4 text-2xl">
             <span className="animate-pulse">🌱</span>
             <span className="animate-pulse delay-100">🌿</span>

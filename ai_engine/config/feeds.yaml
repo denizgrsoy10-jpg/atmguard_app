@@ -1,0 +1,59 @@
+# ════════════════════════════════════════════════════════════════════════
+#  SQL FEED RUNNER — YAPILANDIRMA
+#  Banka SQL sorguları → Beyin API endpoint'leri ("canlı hortumlar")
+#
+#  Her feed:
+#    - bir SQL dosyası çalıştırır (sql/ klasöründe)
+#    - dönen satırları payload_key altında listeye koyar
+#    - beyin endpoint'ine POST eder
+#
+#  Beyin adresi BRAIN_URL ortam değişkeninden okunur (yoksa default).
+#  Banka DB bağlantısı BANK_DB_URL ortam değişkeninden okunur (.env).
+# ════════════════════════════════════════════════════════════════════════
+
+defaults:
+  brain_url_env:     BRAIN_URL              # önce bu env'e bakılır
+  brain_url_default: http://localhost:8000  # env yoksa bu kullanılır
+  timeout_sec:       30                      # beyin POST timeout
+  batch_size:        500                     # tek POST'ta gönderilecek max satır (0 = sınırsız)
+
+feeds:
+  # ── 1) Terminal master: ATM tanım listesi (günde 1 kez, sabah) ──────────
+  - id:          terminal_master
+    aciklama:    "ATM terminal tanım listesi"
+    sql_file:    sql/terminal_master.sql
+    endpoint:    /api/v1/terminal-tanim
+    payload_key: terminaller
+    schedule:    { type: cron, hour: 6, minute: 0 }
+    params:      []
+    bool_fields: [sube_personel_var]
+
+  # ── 2) Arıza feed: online arıza event'leri (15 dk'da bir) ───────────────
+  - id:          ariza_feed
+    aciklama:    "Online arıza event feed"
+    sql_file:    sql/ariza_feed.sql
+    endpoint:    /api/v1/ariza-feed
+    payload_key: olaylar
+    schedule:    { type: interval, minutes: 15 }
+    params:      [since]
+    lookback_minutes: 20        # :since = şimdi - 20 dk (örtüşmeli pencere)
+
+  # ── 3) Bakiye feed: anlık nakit durumu (15 dk'da bir) ───────────────────
+  - id:          bakiye_feed
+    aciklama:    "Anlık ATM bakiye feed"
+    sql_file:    sql/bakiye_feed.sql
+    endpoint:    /api/v1/bakiye-feed
+    payload_key: bakiyeler
+    schedule:    { type: interval, minutes: 15 }
+    params:      [since]
+    lookback_minutes: 20
+
+  # ── 4) Günsonu batch: ikmal/toplama/çekim özeti (her gece 03:00) ────────
+  - id:          gunson_batch
+    aciklama:    "Günsonu batch özeti"
+    sql_file:    sql/gunson_batch.sql
+    endpoint:    /api/v1/gunson
+    payload_key: kayitlar
+    schedule:    { type: cron, hour: 3, minute: 0 }
+    params:      [gun]          # :gun = bugünün tarihi (YYYY-MM-DD)
+    bool_fields: [sifirlama_yapildi]

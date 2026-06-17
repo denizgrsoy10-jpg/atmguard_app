@@ -69,7 +69,35 @@ interface ATMHubData {
   locationAvailability3Months: number;  // 3 aylık lokasyon availability
   atmAvailability6Months: number;       // 6 aylık ATM availability
   locationAvailability6Months: number;  // 6 aylık lokasyon availability
+
+  // Beyin overlay (canlı beslenince dolu)
+  brainEylem?: string;
+  brainAciliyet?: string;
+  brainSebepler?: string[];
 }
+
+type HubOverlay = Partial<Pick<
+  ATMHubData,
+  | 'faultCount' | 'atmResponseTime' | 'slmResponseTime'
+  | 'depositFailureCount' | 'withdrawalFailureCount' | 'withdrawalNoReplenishCount'
+  | 'atmAvailability' | 'locationAvailability' | 'withdrawalAvailability' | 'depositAvailability'
+  | 'atmAvailabilityDaily' | 'locationAvailabilityDaily'
+  | 'atmAvailability1Month' | 'locationAvailability1Month'
+  | 'atmAvailability3Months' | 'locationAvailability3Months'
+  | 'atmAvailability6Months' | 'locationAvailability6Months'
+  | 'brainEylem' | 'brainAciliyet' | 'brainSebepler'
+>>;
+
+type HubSummary = {
+  total_atms: number;
+  brain_tracked: number;
+  aktif_ariza: number;
+  bakiye_kaydi: number;
+  kritik_atm: number;
+  kombine_servis: number;
+  toplam_nakit_tl: number;
+  karar_sayisi: number;
+};
 
 // Animasyonlu sayı bileşeni
 function AnimatedNumber({ value, decimals = 0, suffix = '' }: { value: number; decimals?: number; suffix?: string }) {
@@ -164,6 +192,8 @@ export default function ATMHubPage() {
   const [atmList, setAtmList] = useState<ATMHubData[]>([]);
   const [selectedATM, setSelectedATM] = useState<ATMHubData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hubSource, setHubSource] = useState<'brain' | 'mock'>('mock');
+  const [hubSummary, setHubSummary] = useState<HubSummary | null>(null);
   
   // Filtre state'leri
   const [selectedRegion, setSelectedRegion] = useState<string>('all');
@@ -192,77 +222,109 @@ export default function ATMHubPage() {
   const [mapCenterATM, setMapCenterATM] = useState<ATMHubData | null>(null);
 
   useEffect(() => {
-    // Gerçek ATM verilerini yükle ve mock performans verileriyle birleştir
-    const activeATMs = (atmMasterData as ATMMaster[])
-      .filter(atm => atm.active); // Tüm aktif ATM'ler (3642 adet)
-    
-    const atmDataWithMetrics: ATMHubData[] = activeATMs.map(atm => {
-      // Her ATM için rastgele ama gerçekçi metrikler oluştur
-      const availability = 90 + Math.random() * 9; // 90-99%
-      const isGood = availability > 95;
-      
-      return {
-        atmId: atm.atm_id,
-        atmName: atm.atm_name,
-        location: `${atm.city} / ${atm.district}`,
-        city: atm.city,
-        district: atm.district,
-        region: atm.region,
-        locationType: atm.location_type,
-        brand: atm.brand,
-        model: atm.model,
-        atmAge: atm.atm_age,
-        
-        // Performansa göre metrikler
-        depositFailureCount: Math.floor(Math.random() * (isGood ? 10 : 20)) + (isGood ? 3 : 8),
-        withdrawalFailureCount: Math.floor(Math.random() * (isGood ? 8 : 15)) + (isGood ? 2 : 5),
-        withdrawalNoReplenishCount: Math.floor(Math.random() * (isGood ? 15 : 35)) + (isGood ? 5 : 15),
-        
-        avgCashBalance: Math.floor(Math.random() * 200000) + 150000, // 150k-350k
-        currentCashBalance: Math.floor(Math.random() * 300000) + 100000, // 100k-400k
-        cassette1: Math.floor(Math.random() * 150000) + 80000, // 200₺ Kaset 1
-        cassette2: Math.floor(Math.random() * 150000) + 80000, // 200₺ Kaset 2
-        cassette3: Math.floor(Math.random() * 150000) + 80000, // 100₺ Kaset 3
-        cassette4: Math.floor(Math.random() * 150000) + 80000, // 100₺ Kaset 4
-        // Para yatırma kaseti: Gerçekçi senaryo (200₺, 100₺, 50₺ karışık)
-        ...((): { depositCassette: number; deposit200: number; deposit100: number; deposit50: number } => {
-          // Toplam 2000 banknot kapasitesi için gerçekçi dağılım
-          // Senaryo: Müşteriler genelde 200₺ ve 100₺ yatırır, 50₺ daha az
-          const count200 = Math.floor(Math.random() * 600) + 300;  // 300-900 adet 200₺
-          const count100 = Math.floor(Math.random() * 500) + 200;  // 200-700 adet 100₺
-          const count50 = Math.floor(Math.random() * 300) + 100;   // 100-400 adet 50₺
-          const total = (count200 * 200) + (count100 * 100) + (count50 * 50);
-          return {
-            depositCassette: total,
-            deposit200: count200,
-            deposit100: count100,
-            deposit50: count50
-          };
-        })(),
-        lastBalanceUpdate: new Date(Date.now() - Math.random() * 3600000).toISOString(),
-        
-        faultCount: Math.floor(Math.random() * (isGood ? 5 : 12)) + (isGood ? 1 : 3),
-        atmResponseTime: Math.floor(Math.random() * (isGood ? 30 : 50)) + (isGood ? 25 : 40),
-        slmResponseTime: Math.floor(Math.random() * (isGood ? 60 : 100)) + (isGood ? 60 : 90),
-        
-        atmAvailability: availability,
-        locationAvailability: availability - (Math.random() * 2), // Biraz daha düşük
-        withdrawalAvailability: availability - (Math.random() * 1), // Para çekme biraz daha iyi
-        depositAvailability: availability - (Math.random() * 3), // Para yatırma biraz daha düşük
-        atmAvailabilityDaily: availability + (Math.random() * 2 - 1), // Günlük biraz farklı
-        locationAvailabilityDaily: availability - (Math.random() * 1.5),
-        atmAvailability1Month: availability - (Math.random() * 1.5), // 1 aylık biraz daha düşük
-        locationAvailability1Month: availability - (Math.random() * 2.5),
-        atmAvailability3Months: availability - (Math.random() * 2), // 3 aylık daha da düşük
-        locationAvailability3Months: availability - (Math.random() * 3),
-        atmAvailability6Months: availability - (Math.random() * 2.5), // 6 aylık
-        locationAvailability6Months: availability - (Math.random() * 3.5),
-      };
-    });
+    async function loadATMData() {
+      setLoading(true);
 
-    setAtmList(atmDataWithMetrics);
-    setSelectedATM(atmDataWithMetrics[0]);
-    setLoading(false);
+      // Beyin overlay — terminal bazlı canlı metrikler
+      let overlay: Record<string, HubOverlay> = {};
+      try {
+        const r = await fetch('/api/atm-hub', { cache: 'no-store' });
+        const j = await r.json();
+        overlay = j.overlay || {};
+        setHubSource(j._source === 'brain' ? 'brain' : 'mock');
+        setHubSummary(j.summary || null);
+      } catch {
+        setHubSource('mock');
+        setHubSummary(null);
+      }
+
+      const activeATMs = (atmMasterData as ATMMaster[])
+        .filter(atm => atm.active);
+
+      const atmDataWithMetrics: ATMHubData[] = activeATMs.map(atm => {
+        const brain = overlay[atm.atm_id];
+        const availability = brain?.atmAvailability ?? (90 + Math.random() * 9);
+        const isGood = availability > 95;
+
+        const mockMetrics = {
+          depositFailureCount: Math.floor(Math.random() * (isGood ? 10 : 20)) + (isGood ? 3 : 8),
+          withdrawalFailureCount: Math.floor(Math.random() * (isGood ? 8 : 15)) + (isGood ? 2 : 5),
+          withdrawalNoReplenishCount: Math.floor(Math.random() * (isGood ? 15 : 35)) + (isGood ? 5 : 15),
+          avgCashBalance: Math.floor(Math.random() * 200000) + 150000,
+          currentCashBalance: Math.floor(Math.random() * 300000) + 100000,
+          cassette1: Math.floor(Math.random() * 150000) + 80000,
+          cassette2: Math.floor(Math.random() * 150000) + 80000,
+          cassette3: Math.floor(Math.random() * 150000) + 80000,
+          cassette4: Math.floor(Math.random() * 150000) + 80000,
+          ...((): { depositCassette: number; deposit200: number; deposit100: number; deposit50: number } => {
+            const count200 = Math.floor(Math.random() * 600) + 300;
+            const count100 = Math.floor(Math.random() * 500) + 200;
+            const count50 = Math.floor(Math.random() * 300) + 100;
+            const total = (count200 * 200) + (count100 * 100) + (count50 * 50);
+            return { depositCassette: total, deposit200: count200, deposit100: count100, deposit50: count50 };
+          })(),
+          lastBalanceUpdate: new Date(Date.now() - Math.random() * 3600000).toISOString(),
+          faultCount: Math.floor(Math.random() * (isGood ? 5 : 12)) + (isGood ? 1 : 3),
+          atmResponseTime: Math.floor(Math.random() * (isGood ? 30 : 50)) + (isGood ? 25 : 40),
+          slmResponseTime: Math.floor(Math.random() * (isGood ? 60 : 100)) + (isGood ? 60 : 90),
+          atmAvailability: availability,
+          locationAvailability: availability - (Math.random() * 2),
+          withdrawalAvailability: availability - (Math.random() * 1),
+          depositAvailability: availability - (Math.random() * 3),
+          atmAvailabilityDaily: availability + (Math.random() * 2 - 1),
+          locationAvailabilityDaily: availability - (Math.random() * 1.5),
+          atmAvailability1Month: availability - (Math.random() * 1.5),
+          locationAvailability1Month: availability - (Math.random() * 2.5),
+          atmAvailability3Months: availability - (Math.random() * 2),
+          locationAvailability3Months: availability - (Math.random() * 3),
+          atmAvailability6Months: availability - (Math.random() * 2.5),
+          locationAvailability6Months: availability - (Math.random() * 3.5),
+        };
+
+        return {
+          atmId: atm.atm_id,
+          atmName: atm.atm_name,
+          location: `${atm.city} / ${atm.district}`,
+          city: atm.city,
+          district: atm.district,
+          region: atm.region,
+          locationType: atm.location_type,
+          brand: atm.brand,
+          model: atm.model,
+          atmAge: atm.atm_age,
+          ...mockMetrics,
+          ...(brain ? {
+            faultCount: brain.faultCount ?? mockMetrics.faultCount,
+            atmResponseTime: brain.atmResponseTime ?? mockMetrics.atmResponseTime,
+            slmResponseTime: brain.slmResponseTime ?? mockMetrics.slmResponseTime,
+            depositFailureCount: brain.depositFailureCount ?? mockMetrics.depositFailureCount,
+            withdrawalFailureCount: brain.withdrawalFailureCount ?? mockMetrics.withdrawalFailureCount,
+            withdrawalNoReplenishCount: brain.withdrawalNoReplenishCount ?? mockMetrics.withdrawalNoReplenishCount,
+            atmAvailability: brain.atmAvailability ?? mockMetrics.atmAvailability,
+            locationAvailability: brain.locationAvailability ?? mockMetrics.locationAvailability,
+            withdrawalAvailability: brain.withdrawalAvailability ?? mockMetrics.withdrawalAvailability,
+            depositAvailability: brain.depositAvailability ?? mockMetrics.depositAvailability,
+            atmAvailabilityDaily: brain.atmAvailabilityDaily ?? mockMetrics.atmAvailabilityDaily,
+            locationAvailabilityDaily: brain.locationAvailabilityDaily ?? mockMetrics.locationAvailabilityDaily,
+            atmAvailability1Month: brain.atmAvailability1Month ?? mockMetrics.atmAvailability1Month,
+            locationAvailability1Month: brain.locationAvailability1Month ?? mockMetrics.locationAvailability1Month,
+            atmAvailability3Months: brain.atmAvailability3Months ?? mockMetrics.atmAvailability3Months,
+            locationAvailability3Months: brain.locationAvailability3Months ?? mockMetrics.locationAvailability3Months,
+            atmAvailability6Months: brain.atmAvailability6Months ?? mockMetrics.atmAvailability6Months,
+            locationAvailability6Months: brain.locationAvailability6Months ?? mockMetrics.locationAvailability6Months,
+            brainEylem: brain.brainEylem,
+            brainAciliyet: brain.brainAciliyet,
+            brainSebepler: brain.brainSebepler,
+          } : {}),
+        };
+      });
+
+      setAtmList(atmDataWithMetrics);
+      setSelectedATM(atmDataWithMetrics[0] ?? null);
+      setLoading(false);
+    }
+
+    loadATMData();
   }, []);
 
   // Filtrelenmiş ve sıralanmış ATM listesi
@@ -586,10 +648,24 @@ export default function ATMHubPage() {
             <p className="text-gray-300 text-sm font-medium tracking-wide">
               💼 Executive Command Center • Real-Time Intelligence Dashboard
             </p>
+            {hubSource === 'brain' && hubSummary ? (
+              <div className="mt-2 inline-block text-[10px] px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold">
+                ● CANLI · {hubSummary.brain_tracked} ATM izleniyor · {hubSummary.karar_sayisi} karar · {hubSummary.aktif_ariza} aktif arıza
+              </div>
+            ) : (
+              <div className="mt-2 inline-block text-[10px] px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 font-semibold">
+                ○ Vitrin — beyin beslenince terminal metrikleri canlanır
+              </div>
+            )}
           </div>
           <div className="text-right">
             <div className="text-2xl font-bold text-blue-400">{selectedATM.atmName}</div>
             <div className="text-sm text-gray-400">{selectedATM.atmId} • {selectedATM.location}</div>
+            {selectedATM.brainEylem && (
+              <div className="text-[10px] mt-1 px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 inline-block">
+                🧠 {selectedATM.brainEylem} · {selectedATM.brainAciliyet}
+              </div>
+            )}
           </div>
         </div>
 

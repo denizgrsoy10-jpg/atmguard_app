@@ -164,6 +164,20 @@ function calculateATMCosts(atms: ATMData[]): ATMData[] {
   });
 }
 
+type BrainBudget = {
+  brain_aktif: boolean;
+  karar_sayisi: number;
+  anlik_maliyet: number;
+  anlik_tasarruf: number;
+  tasarruf_oran: number;
+  flm: number;
+  slm: number;
+  ikmal: number;
+  toplama: number;
+  kombine: number;
+  _source: 'brain' | 'mock';
+};
+
 export default function BudgetPerformancePage() {
   const [expandedCenters, setExpandedCenters] = useState<Set<string>>(new Set());
   const [expandedZones, setExpandedZones] = useState<Set<string>>(new Set());
@@ -173,6 +187,23 @@ export default function BudgetPerformancePage() {
   const [kmTableExpanded, setKmTableExpanded] = useState(false);
   const [startDate, setStartDate] = useState('2026-01-01');
   const [endDate, setEndDate] = useState('2026-12-31');
+  const [brainBudget, setBrainBudget] = useState<BrainBudget | null>(null);
+
+  // Beyin anlık karar döngüsü özeti (canlı maliyet/tasarruf tahmini)
+  React.useEffect(() => {
+    let alive = true;
+    fetch('/api/budget-performance', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((d) => {
+        if (alive) setBrainBudget(d);
+      })
+      .catch(() => {
+        if (alive) setBrainBudget(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // CSV'den tüm ATM'leri yükle
   React.useEffect(() => {
@@ -486,6 +517,66 @@ Sonraki Güncelleme: ${new Date(Date.now() + 30*24*60*60*1000).toLocaleDateStrin
           <div className="text-xs text-[#8B5CF6] mb-1">Motor Hedefi (AI)</div>
           <div className="text-2xl font-bold text-[#8B5CF6]">₺228.0M</div>
           <div className="text-xs text-[#8B5CF6] mt-1 font-semibold">%18.2 🎯 Nis+ Full AI</div>
+        </div>
+      </div>
+
+      {/* 🧠 BEYİN CANLI KARAR ÖZETİ — anlık karar döngüsü (toplam_tahmini_maliyet/tasarruf) */}
+      <div className="bg-gradient-to-br from-[#8B5CF6]/10 to-[#2E86FF]/5 rounded-2xl p-5 ring-1 ring-[#8B5CF6]/30 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">🧠</span>
+            <div>
+              <div className="text-base font-bold text-white">Beyin Canlı Karar Özeti</div>
+              <div className="text-xs text-[#A7B8D8]">
+                Anlık karar döngüsü — motor şu an saha verisiyle ne öneriyor
+              </div>
+            </div>
+          </div>
+          {brainBudget?._source === 'brain' ? (
+            <span className="text-xs px-3 py-1 rounded-full bg-[#10B981]/20 text-[#10B981] font-semibold">
+              ● CANLI · {brainBudget.karar_sayisi} karar
+            </span>
+          ) : (
+            <span className="text-xs px-3 py-1 rounded-full bg-[#F59E0B]/20 text-[#F59E0B] font-semibold">
+              ○ Vitrin — beyin beslenince dolacak
+            </span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-[#0E2142]/60 rounded-lg p-4">
+            <div className="text-xs text-[#A7B8D8] mb-1">Anlık Karar Maliyeti</div>
+            <div className="text-2xl font-bold text-[#F59E0B]">
+              ₺{(brainBudget?.anlik_maliyet ?? 0).toLocaleString('tr-TR')}
+            </div>
+            <div className="text-xs text-[#A7B8D8] mt-1">önerilen işlerin maliyeti</div>
+          </div>
+          <div className="bg-[#0E2142]/60 rounded-lg p-4 ring-1 ring-[#10B981]/40">
+            <div className="text-xs text-[#A7B8D8] mb-1">Anlık Tasarruf Tahmini</div>
+            <div className="text-2xl font-bold text-[#10B981]">
+              ₺{(brainBudget?.anlik_tasarruf ?? 0).toLocaleString('tr-TR')}
+            </div>
+            <div className="text-xs text-[#10B981] mt-1 font-semibold">
+              %{(brainBudget?.tasarruf_oran ?? 0).toFixed(1)} tasarruf oranı
+            </div>
+          </div>
+          <div className="bg-[#0E2142]/60 rounded-lg p-4">
+            <div className="text-xs text-[#A7B8D8] mb-1">FLM / SLM Önerisi</div>
+            <div className="text-2xl font-bold text-white">
+              {brainBudget?.flm ?? 0} <span className="text-sm text-[#A7B8D8]">/</span> {brainBudget?.slm ?? 0}
+            </div>
+            <div className="text-xs text-[#A7B8D8] mt-1">FLM (Bantaş) / SLM (Teknisyen)</div>
+          </div>
+          <div className="bg-[#0E2142]/60 rounded-lg p-4">
+            <div className="text-xs text-[#A7B8D8] mb-1">Nakit & Kombine</div>
+            <div className="text-2xl font-bold text-[#2E86FF]">
+              {(brainBudget?.ikmal ?? 0) + (brainBudget?.toplama ?? 0)}{' '}
+              <span className="text-sm text-[#A7B8D8]">+{brainBudget?.kombine ?? 0} kombine</span>
+            </div>
+            <div className="text-xs text-[#A7B8D8] mt-1">
+              İkmal {brainBudget?.ikmal ?? 0} · Toplama {brainBudget?.toplama ?? 0}
+            </div>
+          </div>
         </div>
       </div>
 
